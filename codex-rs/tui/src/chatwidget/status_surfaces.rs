@@ -11,6 +11,7 @@ use crate::chatwidget::rate_limits::get_limits_duration;
 use crate::legacy_core::config::Config;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
+use crate::status::format_reset_countdown;
 use crate::status::format_tokens_compact;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
@@ -298,7 +299,34 @@ impl ChatWidget {
         self.warn_invalid_terminal_title_items_once(&selections.invalid_terminal_title_items);
         self.sync_status_surface_shared_state(&selections);
         self.refresh_status_line_from_selections(&selections);
+        self.schedule_status_line_reset_countdown(&selections);
         self.refresh_terminal_title_from_selections(&selections);
+    }
+
+    fn schedule_status_line_reset_countdown(&self, selections: &StatusSurfaceSelections) {
+        let now = Local::now();
+        let codex_snapshot = self.rate_limit_snapshots_by_limit_id.get("codex");
+        let reset_at = selections
+            .status_line_items
+            .iter()
+            .filter_map(|item| match item {
+                StatusLineItem::FiveHourLimitResetIn => codex_snapshot
+                    .and_then(five_hour_status_window)
+                    .and_then(|(window, _)| window.reset_at),
+                StatusLineItem::WeeklyLimitResetIn => codex_snapshot
+                    .and_then(weekly_status_window)
+                    .and_then(|(window, _)| window.reset_at),
+                _ => None,
+            })
+            .filter(|reset_at| *reset_at > now)
+            .min();
+        let Some(reset_at) = reset_at else {
+            return;
+        };
+
+        let seconds_until_change = reset_at.signed_duration_since(now).num_seconds() % 60 + 1;
+        self.frame_requester
+            .schedule_frame_in(Duration::from_secs(seconds_until_change as u64));
     }
 
     /// Recomputes and emits the terminal title from config and runtime state.
@@ -730,6 +758,20 @@ impl ChatWidget {
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
                 self.status_line_limit_display(Some(window), &label)
             }
+            StatusLineItem::FiveHourLimitResetIn => self.status_line_reset_countdown(
+                self.rate_limit_snapshots_by_limit_id
+                    .get("codex")
+                    .and_then(five_hour_status_window)
+                    .map(|(window, _)| window),
+                "5h reset",
+            ),
+            StatusLineItem::WeeklyLimitResetIn => self.status_line_reset_countdown(
+                self.rate_limit_snapshots_by_limit_id
+                    .get("codex")
+                    .and_then(weekly_status_window)
+                    .map(|(window, _)| window),
+                "Week reset",
+            ),
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
@@ -789,6 +831,15 @@ impl ChatWidget {
         }
     }
 
+    fn status_line_reset_countdown(
+        &self,
+        window: Option<&RateLimitWindowDisplay>,
+        label: &str,
+    ) -> Option<String> {
+        format_reset_countdown(window?.reset_at, Local::now())
+            .map(|countdown| format!("{label} {countdown}"))
+    }
+
     fn status_line_pull_request_url(&self) -> Option<String> {
         self.status_line_git_summary
             .as_ref()
@@ -818,6 +869,8 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ContextUsed => StatusLineItem::ContextUsed,
             StatusSurfacePreviewItem::FiveHourLimit => StatusLineItem::FiveHourLimit,
             StatusSurfacePreviewItem::WeeklyLimit => StatusLineItem::WeeklyLimit,
+            StatusSurfacePreviewItem::FiveHourLimitResetIn => StatusLineItem::FiveHourLimitResetIn,
+            StatusSurfacePreviewItem::WeeklyLimitResetIn => StatusLineItem::WeeklyLimitResetIn,
             StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,

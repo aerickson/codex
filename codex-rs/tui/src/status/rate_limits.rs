@@ -71,6 +71,8 @@ pub(crate) struct RateLimitWindowDisplay {
     pub used_percent: f64,
     /// Human-readable local reset time.
     pub resets_at: Option<String>,
+    /// Exact local reset time, retained for countdown displays that are refreshed at render time.
+    pub reset_at: Option<DateTime<Local>>,
     /// Window length in minutes when provided by the server.
     pub window_minutes: Option<i64>,
 }
@@ -86,8 +88,44 @@ impl RateLimitWindowDisplay {
         Self {
             used_percent: f64::from(window.used_percent),
             resets_at,
+            reset_at: resets_at_utc,
             window_minutes: window.window_duration_mins,
         }
+    }
+}
+
+/// Formats the remaining time until a rate-limit reset.
+///
+/// Expired and missing timestamps intentionally have no display value: the next rate-limit
+/// response can supply a new reset timestamp without leaving stale data in the status line.
+pub(crate) fn format_reset_countdown(
+    reset_at: Option<DateTime<Local>>,
+    now: DateTime<Local>,
+) -> Option<String> {
+    let remaining_seconds = reset_at?.signed_duration_since(now).num_seconds();
+    if remaining_seconds <= 0 {
+        return None;
+    }
+
+    let remaining_minutes = remaining_seconds / 60;
+    const MINUTES_PER_HOUR: i64 = 60;
+    const MINUTES_PER_DAY: i64 = 24 * MINUTES_PER_HOUR;
+    if remaining_minutes >= MINUTES_PER_DAY {
+        Some(format!(
+            "{}d {}h",
+            remaining_minutes / MINUTES_PER_DAY,
+            (remaining_minutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR
+        ))
+    } else if remaining_minutes >= MINUTES_PER_HOUR {
+        Some(format!(
+            "{}h {}m",
+            remaining_minutes / MINUTES_PER_HOUR,
+            remaining_minutes % MINUTES_PER_HOUR
+        ))
+    } else if remaining_minutes > 0 {
+        Some(format!("{remaining_minutes}m"))
+    } else {
+        Some("<1m".to_string())
     }
 }
 
@@ -422,6 +460,8 @@ mod tests {
     use super::RateLimitWindowDisplay;
     use super::StatusRateLimitData;
     use super::compose_rate_limit_data_many;
+    use super::format_reset_countdown;
+    use chrono::Duration as ChronoDuration;
     use chrono::Local;
     use pretty_assertions::assert_eq;
 
@@ -429,8 +469,27 @@ mod tests {
         RateLimitWindowDisplay {
             used_percent,
             resets_at: Some("soon".to_string()),
+            reset_at: None,
             window_minutes: Some(300),
         }
+    }
+
+    #[test]
+    fn reset_countdown_is_compact_and_omits_expired_timestamps() {
+        let now = Local::now();
+
+        assert_eq!(
+            format_reset_countdown(Some(now + ChronoDuration::minutes(102)), now),
+            Some("1h 42m".to_string())
+        );
+        assert_eq!(
+            format_reset_countdown(Some(now + ChronoDuration::minutes(80 * 60)), now),
+            Some("3d 8h".to_string())
+        );
+        assert_eq!(
+            format_reset_countdown(Some(now - ChronoDuration::seconds(1)), now),
+            None
+        );
     }
 
     #[test]
@@ -488,11 +547,13 @@ mod tests {
             primary: Some(RateLimitWindowDisplay {
                 used_percent: 20.0,
                 resets_at: Some("soon".to_string()),
+                reset_at: None,
                 window_minutes: Some(60),
             }),
             secondary: Some(RateLimitWindowDisplay {
                 used_percent: 40.0,
                 resets_at: Some("later".to_string()),
+                reset_at: None,
                 window_minutes: Some(2 * 60),
             }),
             credits: None,

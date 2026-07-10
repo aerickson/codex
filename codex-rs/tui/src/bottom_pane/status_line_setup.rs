@@ -113,6 +113,12 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the secondary rate limit.
     WeeklyLimit,
 
+    /// Countdown until the primary rate limit resets.
+    FiveHourLimitResetIn,
+
+    /// Countdown until the secondary rate limit resets.
+    WeeklyLimitResetIn,
+
     /// Codex application version.
     CodexVersion,
 
@@ -186,6 +192,12 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
+            StatusLineItem::FiveHourLimitResetIn => {
+                "Time until the 5-hour usage limit resets (omitted when unavailable)"
+            }
+            StatusLineItem::WeeklyLimitResetIn => {
+                "Time until the weekly usage limit resets (omitted when unavailable)"
+            }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
@@ -232,6 +244,8 @@ impl StatusLineItem {
             StatusLineItem::ContextUsed => StatusSurfacePreviewItem::ContextUsed,
             StatusLineItem::FiveHourLimit => StatusSurfacePreviewItem::FiveHourLimit,
             StatusLineItem::WeeklyLimit => StatusSurfacePreviewItem::WeeklyLimit,
+            StatusLineItem::FiveHourLimitResetIn => StatusSurfacePreviewItem::FiveHourLimitResetIn,
+            StatusLineItem::WeeklyLimitResetIn => StatusSurfacePreviewItem::WeeklyLimitResetIn,
             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
             StatusLineItem::ContextWindowSize => StatusSurfacePreviewItem::ContextWindowSize,
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,
@@ -372,7 +386,10 @@ impl StatusLineSetupView {
         let default_name = item.to_string();
         let default_description = item.description();
         let (name, description) = match item {
-            StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => (
+            StatusLineItem::FiveHourLimit
+            | StatusLineItem::WeeklyLimit
+            | StatusLineItem::FiveHourLimitResetIn
+            | StatusLineItem::WeeklyLimitResetIn => (
                 preview_data.rate_limit_item_name(item.preview_item(), &default_name),
                 preview_data.rate_limit_item_description(item.preview_item(), default_description),
             ),
@@ -530,6 +547,18 @@ mod tests {
         assert_eq!(
             "branch-changes".parse::<StatusLineItem>(),
             Ok(StatusLineItem::BranchChanges)
+        );
+    }
+
+    #[test]
+    fn rate_limit_reset_countdown_items_are_selectable_ids() {
+        assert_eq!(
+            "five-hour-limit-reset-in".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::FiveHourLimitResetIn)
+        );
+        assert_eq!(
+            "weekly-limit-reset-in".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitResetIn)
         );
     }
 

@@ -23,6 +23,8 @@ pub(crate) enum StatusSurfacePreviewItem {
     ContextUsed,
     FiveHourLimit,
     WeeklyLimit,
+    FiveHourLimitResetIn,
+    WeeklyLimitResetIn,
     CodexVersion,
     ContextWindowSize,
     UsedTokens,
@@ -59,6 +61,8 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ContextUsed => "Context 0% used",
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
+            StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
+            StatusSurfacePreviewItem::WeeklyLimitResetIn => "Week reset 3d 8h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
@@ -95,6 +99,8 @@ impl StatusSurfacePreviewItem {
             Self::ContextUsed,
             Self::FiveHourLimit,
             Self::WeeklyLimit,
+            Self::FiveHourLimitResetIn,
+            Self::WeeklyLimitResetIn,
             Self::CodexVersion,
             Self::ContextWindowSize,
             Self::UsedTokens,
@@ -259,6 +265,16 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
         Some(RateLimitPreviewCopy {
             name: "usage-limit",
             description: "Remaining usage on the primary usage limit (omitted when unavailable)",
+        })
+    } else if value.starts_with("5h reset ") {
+        Some(RateLimitPreviewCopy {
+            name: "five-hour-limit-reset-in",
+            description: "Time until the 5-hour usage limit resets (omitted when unavailable)",
+        })
+    } else if value.starts_with("Week reset ") {
+        Some(RateLimitPreviewCopy {
+            name: "weekly-limit-reset-in",
+            description: "Time until the weekly usage limit resets (omitted when unavailable)",
         })
     } else if value.starts_with("5h ") {
         Some(RateLimitPreviewCopy {

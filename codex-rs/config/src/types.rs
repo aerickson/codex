@@ -729,6 +729,9 @@ pub struct Tui {
 
     /// Ordered list of status line item identifiers.
     ///
+    /// Rate-limit countdown identifiers include `five-hour-limit-reset-in` and
+    /// `weekly-limit-reset-in`; they are omitted until the API provides a future reset time.
+    ///
     /// When set, the TUI renders the selected items as the status line.
     /// When unset, the TUI defaults to: `model-with-reasoning` and `current-dir`.
     #[serde(default)]
