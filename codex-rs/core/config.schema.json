@@ -5645,7 +5645,7 @@
         },
         "status_line": {
           "default": null,
-          "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `current-dir`, and `thread-name`.",
+          "description": "Ordered list of status line item identifiers.\n\nRate-limit countdown identifiers include `five-hour-limit-reset-in` and `weekly-limit-reset-in`; they are omitted until the API provides a future reset time.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `current-dir`, and `thread-name`.",
           "items": {
             "type": "string"
           },
