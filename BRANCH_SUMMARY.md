@@ -10,13 +10,17 @@ countdown can update as time passes without another API response.
 
 ## Configuration
 
-The new `tui.status_line` items are:
+The four rate-limit `tui.status_line` items are:
 
-- `five-hour-limit-reset-in`
-- `weekly-limit-reset-in`
+- `five-hour-limit` (existing)
+- `weekly-limit` (existing)
 
-They are independent of the existing `five-hour-limit` and `weekly-limit` percentage items. For
-example:
+- `five-hour-limit-reset-in` (new)
+- `weekly-limit-reset-in` (new)
+
+When a reset item immediately follows its matching percentage item, the two indicators are
+rendered as one segment. They remain independently configurable, so either can still be shown
+alone. For example:
 
 ```toml
 [tui]
@@ -31,7 +35,7 @@ status_line = [
 Example output:
 
 ```text
-5h 53% left · 5h reset 1h 42m · weekly 93% left · Week reset 3d 8h
+5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h)
 ```
 
 Missing or expired reset timestamps omit the corresponding countdown item. Countdown redraws are
@@ -42,4 +46,3 @@ scheduled at minute boundaries.
 - `just test -p codex-tui`: 2,980 tests passed, 4 skipped.
 - `just fix -p codex-tui` passed.
 - Release CLI build completed from this branch.
-

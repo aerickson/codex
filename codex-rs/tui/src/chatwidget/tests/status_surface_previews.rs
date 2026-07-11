@@ -431,6 +431,47 @@ async fn status_line_renders_rate_limit_reset_countdowns() {
 }
 
 #[tokio::test]
+async fn status_line_merges_adjacent_rate_limit_reset_countdowns() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let now = Local::now();
+    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        primary: Some(RateLimitWindow {
+            used_percent: 47,
+            window_duration_mins: Some(5 * 60),
+            resets_at: Some(
+                (now + ChronoDuration::minutes(102) + ChronoDuration::seconds(5)).timestamp(),
+            ),
+        }),
+        secondary: Some(RateLimitWindow {
+            used_percent: 7,
+            window_duration_mins: Some(7 * 24 * 60),
+            resets_at: Some(
+                (now + ChronoDuration::hours(80) + ChronoDuration::seconds(5)).timestamp(),
+            ),
+        }),
+        credits: None,
+        individual_limit: None,
+        plan_type: None,
+        rate_limit_reached_type: None,
+    }));
+
+    assert_eq!(
+        status_preview_line(
+            &mut chat,
+            &[
+                StatusLineItem::FiveHourLimit,
+                StatusLineItem::FiveHourLimitResetIn,
+                StatusLineItem::WeeklyLimit,
+                StatusLineItem::WeeklyLimitResetIn,
+            ],
+        ),
+        "5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h)"
+    );
+}
+
+#[tokio::test]
 async fn status_line_setup_popup_rate_limits_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     cache_rate_limit_snapshot(&mut chat);

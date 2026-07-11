@@ -241,9 +241,44 @@ impl StatusSurfacePreviewData {
     where
         I: IntoIterator<Item = StatusLineItem>,
     {
-        let segments = items.into_iter().filter_map(|item| {
-            self.value_for(item.preview_item())
-                .map(|value| (item, value.to_string()))
+        let items: Vec<_> = items.into_iter().collect();
+        let segments = items.iter().enumerate().filter_map(|(index, item)| {
+            let value = self.value_for(item.preview_item())?;
+            let value = match item {
+                StatusLineItem::FiveHourLimit
+                    if items.get(index + 1) == Some(&StatusLineItem::FiveHourLimitResetIn) =>
+                {
+                    self.live_value_for(StatusSurfacePreviewItem::FiveHourLimitResetIn)
+                        .map(|reset| {
+                            format!("{value} (reset {})", reset.trim_start_matches("5h reset "))
+                        })
+                        .unwrap_or_else(|| value.to_string())
+                }
+                StatusLineItem::WeeklyLimit
+                    if items.get(index + 1) == Some(&StatusLineItem::WeeklyLimitResetIn) =>
+                {
+                    self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitResetIn)
+                        .map(|reset| {
+                            format!(
+                                "{value} (reset {})",
+                                reset.trim_start_matches("Week reset ")
+                            )
+                        })
+                        .unwrap_or_else(|| value.to_string())
+                }
+                StatusLineItem::FiveHourLimitResetIn
+                    if index > 0 && items[index - 1] == StatusLineItem::FiveHourLimit =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyLimitResetIn
+                    if index > 0 && items[index - 1] == StatusLineItem::WeeklyLimit =>
+                {
+                    return None;
+                }
+                _ => value.to_string(),
+            };
+            Some((*item, value))
         });
         status_line_from_segments(segments, use_theme_colors)
     }

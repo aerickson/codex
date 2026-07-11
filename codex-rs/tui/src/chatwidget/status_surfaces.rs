@@ -208,8 +208,48 @@ impl ChatWidget {
         }
 
         let mut segments = Vec::new();
-        for item in &selections.status_line_items {
+        for (index, item) in selections.status_line_items.iter().enumerate() {
             if let Some(value) = self.status_line_value_for_item(*item) {
+                let value = match item {
+                    StatusLineItem::FiveHourLimit
+                        if selections.status_line_items.get(index + 1)
+                            == Some(&StatusLineItem::FiveHourLimitResetIn) =>
+                    {
+                        self.status_line_value_for_item(StatusLineItem::FiveHourLimitResetIn)
+                            .map(|reset| {
+                                format!("{value} (reset {})", reset.trim_start_matches("5h reset "))
+                            })
+                            .unwrap_or(value)
+                    }
+                    StatusLineItem::WeeklyLimit
+                        if selections.status_line_items.get(index + 1)
+                            == Some(&StatusLineItem::WeeklyLimitResetIn) =>
+                    {
+                        self.status_line_value_for_item(StatusLineItem::WeeklyLimitResetIn)
+                            .map(|reset| {
+                                format!(
+                                    "{value} (reset {})",
+                                    reset.trim_start_matches("Week reset ")
+                                )
+                            })
+                            .unwrap_or(value)
+                    }
+                    StatusLineItem::FiveHourLimitResetIn
+                        if index > 0
+                            && selections.status_line_items[index - 1]
+                                == StatusLineItem::FiveHourLimit =>
+                    {
+                        continue;
+                    }
+                    StatusLineItem::WeeklyLimitResetIn
+                        if index > 0
+                            && selections.status_line_items[index - 1]
+                                == StatusLineItem::WeeklyLimit =>
+                    {
+                        continue;
+                    }
+                    _ => value,
+                };
                 segments.push((*item, value));
             }
         }
