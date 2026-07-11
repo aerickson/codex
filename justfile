@@ -38,14 +38,14 @@ build:
 # Copy the release binary into the staged local deployment slot.
 deploy-next:
     mkdir -p "$HOME/bin"
-    cp target/release/codex "$HOME/bin/codex-aje-next"
-    "$HOME/bin/codex-aje-next" --version
+    cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
 
 # Promote the staged local binary to the active local deployment.
 promote-next:
     test -x "$HOME/bin/codex-aje-next"
-    cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje"
-    "$HOME/bin/codex-aje" --version
+    cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje.tmp"
+    mv -f "$HOME/bin/codex-aje.tmp" "$HOME/bin/codex-aje"
 
 # `codex exec`
 exec *args:
