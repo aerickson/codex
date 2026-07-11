@@ -27,6 +27,11 @@ build-local *args:
     cargo build -p codex-cli {args}
 
 # Build the optimized local CLI binary.
+[unix]
+build:
+    nice -n 10 cargo build -p codex-cli --release
+
+[windows]
 build:
     cargo build -p codex-cli --release
 
