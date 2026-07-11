@@ -129,6 +129,23 @@ pub(crate) fn format_reset_countdown(
     }
 }
 
+/// Merges a percentage-usage value with its adjacent reset countdown, e.g.
+/// `"5h 53% left"` + `"5h reset 1h 42m"` -> `"5h 53% left (reset 1h 42m)"`.
+///
+/// `reset_prefix` strips the countdown's own label (`"5h reset "` or `"Week reset "`)
+/// so it isn't duplicated inside the merged segment. Centralized here so the live
+/// status line and the setup-popup preview can't drift on this formatting.
+pub(crate) fn merge_reset_countdown(
+    value: &str,
+    reset_value: Option<&str>,
+    reset_prefix: &str,
+) -> String {
+    match reset_value {
+        Some(reset) => format!("{value} (reset {})", reset.trim_start_matches(reset_prefix)),
+        None => value.to_string(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RateLimitSnapshotDisplay {
     /// Canonical limit identifier (for example: `codex` or `codex_other`).

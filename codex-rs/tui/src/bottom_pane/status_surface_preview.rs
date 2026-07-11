@@ -4,6 +4,7 @@ use ratatui::text::Line;
 
 use super::status_line_from_segments;
 use super::status_line_setup::StatusLineItem;
+use crate::status::merge_reset_countdown;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum StatusSurfacePreviewItem {
@@ -248,23 +249,14 @@ impl StatusSurfacePreviewData {
                 StatusLineItem::FiveHourLimit
                     if items.get(index + 1) == Some(&StatusLineItem::FiveHourLimitResetIn) =>
                 {
-                    self.live_value_for(StatusSurfacePreviewItem::FiveHourLimitResetIn)
-                        .map(|reset| {
-                            format!("{value} (reset {})", reset.trim_start_matches("5h reset "))
-                        })
-                        .unwrap_or_else(|| value.to_string())
+                    let reset = self.live_value_for(StatusSurfacePreviewItem::FiveHourLimitResetIn);
+                    merge_reset_countdown(value, reset, "5h reset ")
                 }
                 StatusLineItem::WeeklyLimit
                     if items.get(index + 1) == Some(&StatusLineItem::WeeklyLimitResetIn) =>
                 {
-                    self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitResetIn)
-                        .map(|reset| {
-                            format!(
-                                "{value} (reset {})",
-                                reset.trim_start_matches("Week reset ")
-                            )
-                        })
-                        .unwrap_or_else(|| value.to_string())
+                    let reset = self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitResetIn);
+                    merge_reset_countdown(value, reset, "Week reset ")
                 }
                 StatusLineItem::FiveHourLimitResetIn
                     if index > 0 && items[index - 1] == StatusLineItem::FiveHourLimit =>

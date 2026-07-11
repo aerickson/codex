@@ -13,6 +13,7 @@ use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_reset_countdown;
 use crate::status::format_tokens_compact;
+use crate::status::merge_reset_countdown;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
@@ -215,24 +216,17 @@ impl ChatWidget {
                         if selections.status_line_items.get(index + 1)
                             == Some(&StatusLineItem::FiveHourLimitResetIn) =>
                     {
-                        self.status_line_value_for_item(StatusLineItem::FiveHourLimitResetIn)
-                            .map(|reset| {
-                                format!("{value} (reset {})", reset.trim_start_matches("5h reset "))
-                            })
-                            .unwrap_or(value)
+                        let reset =
+                            self.status_line_value_for_item(StatusLineItem::FiveHourLimitResetIn);
+                        merge_reset_countdown(&value, reset.as_deref(), "5h reset ")
                     }
                     StatusLineItem::WeeklyLimit
                         if selections.status_line_items.get(index + 1)
                             == Some(&StatusLineItem::WeeklyLimitResetIn) =>
                     {
-                        self.status_line_value_for_item(StatusLineItem::WeeklyLimitResetIn)
-                            .map(|reset| {
-                                format!(
-                                    "{value} (reset {})",
-                                    reset.trim_start_matches("Week reset ")
-                                )
-                            })
-                            .unwrap_or(value)
+                        let reset =
+                            self.status_line_value_for_item(StatusLineItem::WeeklyLimitResetIn);
+                        merge_reset_countdown(&value, reset.as_deref(), "Week reset ")
                     }
                     StatusLineItem::FiveHourLimitResetIn
                         if index > 0
