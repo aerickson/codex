@@ -2,7 +2,7 @@
 
 Branch: `20260710-status-line-rate-limit-reset-countdowns`
 
-Commit: `ef6c52bb92`
+Commit: `718950d9c4`
 
 This branch adds quota-reset countdowns to the Codex TUI status line. It uses the existing
 `account/rateLimits/read` data path and retains each window's absolute reset timestamp so the
@@ -32,7 +32,13 @@ status_line = [
 ]
 ```
 
-Example output:
+V1 rendered the indicators as separate segments:
+
+```text
+5h 53% left · 5h reset 1h 42m · weekly 93% left · Week reset 3d 8h
+```
+
+V2 merges each reset countdown into its matching percentage item:
 
 ```text
 5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h)
@@ -43,6 +49,6 @@ scheduled at minute boundaries.
 
 ## Validation
 
-- `just test -p codex-tui`: 2,980 tests passed, 4 skipped.
+- `just test -p codex-tui`: 2,981 tests passed, 4 skipped.
 - `just fix -p codex-tui` passed.
 - Release CLI build completed from this branch.
