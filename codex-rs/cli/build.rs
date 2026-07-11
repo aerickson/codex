@@ -25,9 +25,9 @@ fn git_build_version() -> String {
     .is_some_and(|status| !status.is_empty());
 
     if dirty {
-        format!("0.0.0+g{sha}.dirty")
+        format!("0.0.0+{sha}.dirty")
     } else {
-        format!("0.0.0+g{sha}")
+        format!("0.0.0+{sha}")
     }
 }
 
