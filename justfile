@@ -47,6 +47,41 @@ promote-next:
     cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje.tmp"
     mv -f "$HOME/bin/codex-aje.tmp" "$HOME/bin/codex-aje"
 
+# Show the versions and fast checksums of the staged and active local deployments.
+deployment-status:
+    @if test -t 1; then \
+        bold=$(printf '\033[1m'); \
+        cyan=$(printf '\033[36m'); \
+        green=$(printf '\033[32m'); \
+        yellow=$(printf '\033[33m'); \
+        reset=$(printf '\033[0m'); \
+    else \
+        bold=; cyan=; green=; yellow=; reset=; \
+    fi; \
+    printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$bold" Deployment "$reset" Binary Version Checksum Modified; \
+    printf '%-10s  %-18s  %-32s  %-10s  %s\n' '----------' '------------------' '--------------------------------' '----------' '-------------------'; \
+    for deployment in staged active; do \
+        case "$deployment" in \
+            staged) bin="$HOME/bin/codex-aje-next" ;; \
+            active) bin="$HOME/bin/codex-aje" ;; \
+        esac; \
+        if test -x "$bin"; then \
+            version=$("$bin" --version 2>/dev/null); \
+            checksum=$(cksum "$bin" | awk '{print $1}'); \
+            modified=$(date -r "$bin" '+%Y-%m-%d %H:%M:%S %z'); \
+            printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$cyan" "$deployment" "$reset" "$(basename "$bin")" "$version" "$checksum" "$modified"; \
+        else \
+            printf '%s%-10s%s  %-18s  %s%-32s%s  %-10s  %s\n' "$yellow" "$deployment" "$reset" "$(basename "$bin")" "$yellow" missing "$reset" '-' '-'; \
+        fi; \
+    done; \
+    if test -x "$HOME/bin/codex-aje-next" && test -x "$HOME/bin/codex-aje"; then \
+        if cmp -s "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje"; then \
+            printf '%s✓ identical%s  staged and active binaries match\n' "$green" "$reset"; \
+        else \
+            printf '%s✗ different%s  staged and active binaries differ\n' "$yellow" "$reset"; \
+        fi; \
+    fi
+
 # `codex exec`
 exec *args:
     cargo run --bin codex -- exec {args}
