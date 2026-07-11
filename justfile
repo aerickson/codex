@@ -17,6 +17,18 @@ alias c := codex
 codex *args:
     cargo run --bin codex -- {args}
 
+# Build a locally identifiable CLI binary. Pass `--release` for an optimized build.
+[unix]
+build-local *args:
+    CODEX_BUILD_VERSION="0.0.0+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)" cargo build -p codex-cli {args}
+
+[windows]
+build-local *args:
+    $sha = git rev-parse --short=12 HEAD
+    $dirty = if (git diff --quiet HEAD --) { "" } else { ".dirty" }
+    $env:CODEX_BUILD_VERSION = "0.0.0+g$sha$dirty"
+    cargo build -p codex-cli {args}
+
 # `codex exec`
 exec *args:
     cargo run --bin codex -- exec {args}
