@@ -26,6 +26,22 @@ build-local *args:
 build-local *args:
     cargo build -p codex-cli {args}
 
+# Build the optimized local CLI binary.
+build:
+    cargo build -p codex-cli --release
+
+# Copy the release binary into the staged local deployment slot.
+deploy-next:
+    mkdir -p "$HOME/bin"
+    cp target/release/codex "$HOME/bin/codex-aje-next"
+    "$HOME/bin/codex-aje-next" --version
+
+# Promote the staged local binary to the active local deployment.
+promote-next:
+    test -x "$HOME/bin/codex-aje-next"
+    cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje"
+    "$HOME/bin/codex-aje" --version
+
 # `codex exec`
 exec *args:
     cargo run --bin codex -- exec {args}
