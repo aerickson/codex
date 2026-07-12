@@ -52,9 +52,8 @@ deploy-next:
 # Sign a local macOS binary with the first available Developer ID identity.
 [unix]
 sign-binary binary:
-    @identity="$$(security find-identity -v -p codesigning | awk '/"Developer ID Application:/ {print $$2; exit}')"; \
-    test -n "$$identity" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; \
-    codesign --force --timestamp --sign "$$identity" "{{binary}}"
+    @test -n "$$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1)" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; \
+    codesign --force --timestamp --sign "$$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1)" "{{binary}}"
 
 # Sign the staged local deployment in place.
 [unix]
