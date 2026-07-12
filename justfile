@@ -36,10 +36,30 @@ build:
     cargo build -p codex-cli --release
 
 # Copy the release binary into the staged local deployment slot.
+[unix]
+deploy-next:
+    mkdir -p "$HOME/bin"
+    cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    just sign-binary "$HOME/bin/codex-aje-next.tmp"
+    mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+[windows]
 deploy-next:
     mkdir -p "$HOME/bin"
     cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
     mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+# Sign a local macOS binary with the first available Developer ID identity.
+[unix]
+sign-binary binary:
+    @identity="$$(security find-identity -v -p codesigning | awk '/"Developer ID Application:/ {print $$2; exit}')"; \
+    test -n "$$identity" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; \
+    codesign --force --timestamp --sign "$$identity" "{{binary}}"
+
+# Sign the staged local deployment in place.
+[unix]
+sign-next:
+    just sign-binary "$HOME/bin/codex-aje-next"
 
 # Promote the staged local binary to the active local deployment.
 promote-next:
