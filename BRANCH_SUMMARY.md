@@ -43,7 +43,7 @@ status_line = [
 V1 rendered the indicators as separate segments:
 
 ```text
-5h 53% left · 5h reset 1h 42m · weekly 93% left · Week reset 3d 8h · WQuota runway: ~18h
+5h 53% left · 5h reset 1h 42m · weekly 93% left · weekly reset 3d 8h · weekly runway ~18h
 ```
 
 V2 merges each reset countdown into its matching percentage item:
@@ -52,8 +52,8 @@ V2 merges each reset countdown into its matching percentage item:
 5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~18h; margin -2d 14h)
 ```
 
-When shown alone, the runway is labeled `weekly runway: ~18h` and the margin is labeled
-`reset margin: -2d 14h`.
+When shown alone, the runway is labeled `weekly runway ~18h` and the margin is labeled
+`weekly margin -2d 14h`.
 
 Missing or expired reset timestamps omit the corresponding countdown item. Countdown redraws are
 scheduled at minute boundaries. The runway is shown as `n/a` when the weekly window or a
