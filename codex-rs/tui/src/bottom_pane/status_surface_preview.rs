@@ -30,6 +30,7 @@ pub(crate) enum StatusSurfacePreviewItem {
     FiveHourLimitResetIn,
     WeeklyLimitResetIn,
     WeeklyQuotaRunway,
+    WeeklyLimitMargin,
     CodexVersion,
     ContextWindowSize,
     UsedTokens,
@@ -73,6 +74,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
             StatusSurfacePreviewItem::WeeklyLimitResetIn => "Week reset 3d 8h",
             StatusSurfacePreviewItem::WeeklyQuotaRunway => "weekly runway: ~18h",
+            StatusSurfacePreviewItem::WeeklyLimitMargin => "reset margin: -21h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
@@ -116,6 +118,7 @@ impl StatusSurfacePreviewItem {
             Self::FiveHourLimitResetIn,
             Self::WeeklyLimitResetIn,
             Self::WeeklyQuotaRunway,
+            Self::WeeklyLimitMargin,
             Self::CodexVersion,
             Self::ContextWindowSize,
             Self::UsedTokens,
@@ -280,7 +283,10 @@ impl StatusSurfacePreviewData {
                     let runway = (items.get(index + 2) == Some(&StatusLineItem::WeeklyQuotaRunway))
                         .then(|| self.live_value_for(StatusSurfacePreviewItem::WeeklyQuotaRunway))
                         .flatten();
-                    merge_weekly_quota(value, reset, runway)
+                    let margin = (items.get(index + 3) == Some(&StatusLineItem::WeeklyLimitMargin))
+                        .then(|| self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitMargin))
+                        .flatten();
+                    merge_weekly_quota(value, reset, runway, margin)
                 }
                 StatusLineItem::FiveHourLimitResetIn
                     if index > 0 && items[index - 1] == StatusLineItem::FiveHourLimit =>
@@ -291,6 +297,14 @@ impl StatusSurfacePreviewData {
                     if index >= 2
                         && items[index - 2] == StatusLineItem::WeeklyLimit
                         && items[index - 1] == StatusLineItem::WeeklyLimitResetIn =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyLimitMargin
+                    if index >= 3
+                        && items[index - 3] == StatusLineItem::WeeklyLimit
+                        && items[index - 2] == StatusLineItem::WeeklyLimitResetIn
+                        && items[index - 1] == StatusLineItem::WeeklyQuotaRunway =>
                 {
                     return None;
                 }
@@ -343,8 +357,13 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
         })
     } else if value.starts_with("weekly runway: ") {
         Some(RateLimitPreviewCopy {
-            name: "wquota-runway",
+            name: "weekly-limit-runway",
             description: "Estimated time until the weekly quota is exhausted at the current usage rate",
+        })
+    } else if value.starts_with("reset margin: ") {
+        Some(RateLimitPreviewCopy {
+            name: "weekly-limit-margin",
+            description: "Difference between projected weekly quota exhaustion and reset time",
         })
     } else if value.starts_with("5h ") {
         Some(RateLimitPreviewCopy {

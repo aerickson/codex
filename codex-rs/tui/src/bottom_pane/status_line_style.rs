@@ -67,7 +67,8 @@ impl StatusLineAccent {
             | StatusLineItem::WeeklyLimit
             | StatusLineItem::FiveHourLimitResetIn
             | StatusLineItem::WeeklyLimitResetIn
-            | StatusLineItem::WeeklyQuotaRunway => Self::Limit,
+            | StatusLineItem::WeeklyQuotaRunway
+            | StatusLineItem::WeeklyLimitMargin => Self::Limit,
             StatusLineItem::CodexVersion
             | StatusLineItem::Hostname
             | StatusLineItem::SessionId
