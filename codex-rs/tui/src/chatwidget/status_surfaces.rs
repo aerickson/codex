@@ -15,6 +15,7 @@ use crate::status::format_quota_runway;
 use crate::status::format_reset_countdown;
 use crate::status::format_tokens_compact;
 use crate::status::merge_reset_countdown;
+use crate::status::merge_weekly_quota;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
@@ -227,12 +228,25 @@ impl ChatWidget {
                     {
                         let reset =
                             self.status_line_value_for_item(StatusLineItem::WeeklyLimitResetIn);
-                        merge_reset_countdown(&value, reset.as_deref(), "Week reset ")
+                        let runway = (selections.status_line_items.get(index + 2)
+                            == Some(&StatusLineItem::WeeklyQuotaRunway))
+                        .then(|| self.status_line_value_for_item(StatusLineItem::WeeklyQuotaRunway))
+                        .flatten();
+                        merge_weekly_quota(&value, reset.as_deref(), runway.as_deref())
                     }
                     StatusLineItem::FiveHourLimitResetIn
                         if index > 0
                             && selections.status_line_items[index - 1]
                                 == StatusLineItem::FiveHourLimit =>
+                    {
+                        continue;
+                    }
+                    StatusLineItem::WeeklyQuotaRunway
+                        if index >= 2
+                            && selections.status_line_items[index - 2]
+                                == StatusLineItem::WeeklyLimit
+                            && selections.status_line_items[index - 1]
+                                == StatusLineItem::WeeklyLimitResetIn =>
                     {
                         continue;
                     }

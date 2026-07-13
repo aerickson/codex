@@ -30,6 +30,7 @@ pub(crate) use rate_limits::RateLimitWindowDisplay;
 pub(crate) use rate_limits::format_quota_runway;
 pub(crate) use rate_limits::format_reset_countdown;
 pub(crate) use rate_limits::merge_reset_countdown;
+pub(crate) use rate_limits::merge_weekly_quota;
 #[cfg(test)]
 pub(crate) use rate_limits::rate_limit_snapshot_display;
 pub(crate) use rate_limits::rate_limit_snapshot_display_for_limit;

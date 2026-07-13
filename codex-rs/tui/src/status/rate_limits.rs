@@ -135,23 +135,23 @@ pub(crate) fn format_quota_runway(
     now: DateTime<Local>,
 ) -> String {
     let Some(window) = window else {
-        return "WQuota runway: n/a".to_string();
+        return "weekly runway: n/a".to_string();
     };
     let Some(window_minutes) = window.window_minutes else {
-        return "WQuota runway: n/a".to_string();
+        return "weekly runway: n/a".to_string();
     };
     let Some(reset_at) = window.reset_at else {
-        return "WQuota runway: n/a".to_string();
+        return "weekly runway: n/a".to_string();
     };
     if !window.used_percent.is_finite() || window.used_percent <= 0.0 {
-        return "WQuota runway: n/a".to_string();
+        return "weekly runway: n/a".to_string();
     }
 
     let window_seconds = window_minutes.saturating_mul(60);
     let seconds_until_reset = reset_at.signed_duration_since(now).num_seconds();
     let elapsed_seconds = window_seconds.saturating_sub(seconds_until_reset);
     if elapsed_seconds <= 0 {
-        return "WQuota runway: n/a".to_string();
+        return "weekly runway: n/a".to_string();
     }
 
     let runway_seconds = if window.used_percent >= 100.0 {
@@ -161,7 +161,7 @@ pub(crate) fn format_quota_runway(
     };
     let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
         .unwrap_or_else(|| "0m".to_string());
-    format!("WQuota runway: ~{runway}")
+    format!("weekly runway: ~{runway}")
 }
 
 /// Merges a percentage-usage value with its adjacent reset countdown, e.g.
@@ -178,6 +178,26 @@ pub(crate) fn merge_reset_countdown(
     match reset_value {
         Some(reset) => format!("{value} (reset {})", reset.trim_start_matches(reset_prefix)),
         None => value.to_string(),
+    }
+}
+
+/// Merges the weekly usage value, reset countdown, and runway when they are adjacent.
+pub(crate) fn merge_weekly_quota(
+    value: &str,
+    reset_value: Option<&str>,
+    runway_value: Option<&str>,
+) -> String {
+    let value = merge_reset_countdown(value, reset_value, "Week reset ");
+    let Some(runway) = runway_value else {
+        return value;
+    };
+    let runway = runway
+        .strip_prefix("weekly runway: ")
+        .map_or_else(|| runway.to_string(), |runway| format!("runway {runway}"));
+    if reset_value.is_some() {
+        format!("{}; {runway})", value.trim_end_matches(')'))
+    } else {
+        format!("{value} ({runway})")
     }
 }
 
@@ -557,7 +577,7 @@ mod tests {
 
         assert_eq!(
             format_quota_runway(Some(&window), now),
-            "WQuota runway: ~1d 12h"
+            "weekly runway: ~1d 12h"
         );
     }
 
@@ -567,15 +587,15 @@ mod tests {
         let mut window = window(0.0);
         assert_eq!(
             format_quota_runway(Some(&window), now),
-            "WQuota runway: n/a"
+            "weekly runway: n/a"
         );
 
         window.used_percent = 50.0;
         assert_eq!(
             format_quota_runway(Some(&window), now),
-            "WQuota runway: n/a"
+            "weekly runway: n/a"
         );
-        assert_eq!(format_quota_runway(None, now), "WQuota runway: n/a");
+        assert_eq!(format_quota_runway(None, now), "weekly runway: n/a");
     }
 
     #[test]

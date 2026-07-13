@@ -5,6 +5,7 @@ use ratatui::text::Line;
 use super::status_line_from_segments;
 use super::status_line_setup::StatusLineItem;
 use crate::status::merge_reset_countdown;
+use crate::status::merge_weekly_quota;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum StatusSurfacePreviewItem {
@@ -65,7 +66,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
             StatusSurfacePreviewItem::WeeklyLimitResetIn => "Week reset 3d 8h",
-            StatusSurfacePreviewItem::WeeklyQuotaRunway => "WQuota runway: ~18h",
+            StatusSurfacePreviewItem::WeeklyQuotaRunway => "weekly runway: ~18h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
@@ -259,10 +260,20 @@ impl StatusSurfacePreviewData {
                     if items.get(index + 1) == Some(&StatusLineItem::WeeklyLimitResetIn) =>
                 {
                     let reset = self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitResetIn);
-                    merge_reset_countdown(value, reset, "Week reset ")
+                    let runway = (items.get(index + 2) == Some(&StatusLineItem::WeeklyQuotaRunway))
+                        .then(|| self.live_value_for(StatusSurfacePreviewItem::WeeklyQuotaRunway))
+                        .flatten();
+                    merge_weekly_quota(value, reset, runway)
                 }
                 StatusLineItem::FiveHourLimitResetIn
                     if index > 0 && items[index - 1] == StatusLineItem::FiveHourLimit =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyQuotaRunway
+                    if index >= 2
+                        && items[index - 2] == StatusLineItem::WeeklyLimit
+                        && items[index - 1] == StatusLineItem::WeeklyLimitResetIn =>
                 {
                     return None;
                 }
@@ -306,7 +317,7 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
             name: "weekly-limit-reset-in",
             description: "Time until the weekly usage limit resets (omitted when unavailable)",
         })
-    } else if value.starts_with("WQuota runway: ") {
+    } else if value.starts_with("weekly runway: ") {
         Some(RateLimitPreviewCopy {
             name: "wquota-runway",
             description: "Estimated time until the weekly quota is exhausted at the current usage rate",
