@@ -2,11 +2,12 @@
 
 Branch: `20260710-status-line-rate-limit-reset-countdowns`
 
-Commit: `718950d9c4`
+Commit: `e9e96974a9`
 
 This branch adds quota-reset countdowns and a weekly quota runway estimate to the Codex TUI
 status line. It uses the existing `account/rateLimits/read` data path and retains each window's
 absolute reset timestamp so countdowns can update as time passes without another API response.
+Weekly quota percentage, reset countdown, and runway items merge when configured adjacently.
 
 ## Configuration
 
@@ -20,8 +21,9 @@ The rate-limit `tui.status_line` items are:
 - `wquota-runway` (new; estimated time until the weekly quota is exhausted at the current usage rate)
 
 When a reset item immediately follows its matching percentage item, the two indicators are
-rendered as one segment. They remain independently configurable, so either can still be shown
-alone. For example:
+rendered as one segment. When the weekly runway immediately follows that pair, it is included in
+the same segment. The items remain independently configurable, so each can still be shown alone.
+For example:
 
 ```toml
 [tui]
@@ -43,8 +45,10 @@ V1 rendered the indicators as separate segments:
 V2 merges each reset countdown into its matching percentage item:
 
 ```text
-5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h) · WQuota runway: ~18h
+5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~18h)
 ```
+
+When shown alone, the runway is labeled `weekly runway: ~18h`.
 
 Missing or expired reset timestamps omit the corresponding countdown item. Countdown redraws are
 scheduled at minute boundaries. The runway is shown as `n/a` when the weekly window or a
@@ -52,6 +56,6 @@ meaningful usage rate is unavailable.
 
 ## Validation
 
-- `just test -p codex-tui`: 2,981 tests passed, 4 skipped.
+- `just test -p codex-tui`: targeted statusline merge test passed.
 - `just fix -p codex-tui` passed.
 - Release CLI build completed from this branch.
