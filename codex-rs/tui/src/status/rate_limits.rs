@@ -135,11 +135,11 @@ pub(crate) fn format_quota_runway(
     now: DateTime<Local>,
 ) -> String {
     let Some(runway_seconds) = quota_runway_seconds(window, now) else {
-        return "weekly runway: n/a".to_string();
+        return "weekly runway n/a".to_string();
     };
     let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
         .unwrap_or_else(|| "0m".to_string());
-    format!("weekly runway: ~{runway}")
+    format!("weekly runway ~{runway}")
 }
 
 /// Formats the signed difference between projected quota exhaustion and the reset time.
@@ -148,13 +148,13 @@ pub(crate) fn format_quota_margin(
     now: DateTime<Local>,
 ) -> String {
     let Some(window) = window else {
-        return "reset margin: n/a".to_string();
+        return "weekly margin n/a".to_string();
     };
     let Some(reset_at) = window.reset_at else {
-        return "reset margin: n/a".to_string();
+        return "weekly margin n/a".to_string();
     };
     let Some(runway_seconds) = quota_runway_seconds(Some(window), now) else {
-        return "reset margin: n/a".to_string();
+        return "weekly margin n/a".to_string();
     };
 
     let margin_seconds = runway_seconds - reset_at.signed_duration_since(now).num_seconds();
@@ -164,7 +164,7 @@ pub(crate) fn format_quota_margin(
         now,
     )
     .unwrap_or_else(|| "0m".to_string());
-    format!("reset margin: {sign}{margin}")
+    format!("weekly margin {sign}{margin}")
 }
 
 fn quota_runway_seconds(
@@ -195,7 +195,7 @@ fn quota_runway_seconds(
 /// Merges a percentage-usage value with its adjacent reset countdown, e.g.
 /// `"5h 53% left"` + `"5h reset 1h 42m"` -> `"5h 53% left (reset 1h 42m)"`.
 ///
-/// `reset_prefix` strips the countdown's own label (`"5h reset "` or `"Week reset "`)
+/// `reset_prefix` strips the countdown's own label (`"5h reset "` or `"weekly reset "`)
 /// so it isn't duplicated inside the merged segment. Centralized here so the live
 /// status line and the setup-popup preview can't drift on this formatting.
 pub(crate) fn merge_reset_countdown(
@@ -216,19 +216,19 @@ pub(crate) fn merge_weekly_quota(
     runway_value: Option<&str>,
     margin_value: Option<&str>,
 ) -> String {
-    let value = merge_reset_countdown(value, reset_value, "Week reset ");
+    let value = merge_reset_countdown(value, reset_value, "weekly reset ");
     let mut details = Vec::new();
     if let Some(runway) = runway_value {
         details.push(
             runway
-                .strip_prefix("weekly runway: ")
+                .strip_prefix("weekly runway ")
                 .map_or_else(|| runway.to_string(), |runway| format!("runway {runway}")),
         );
     }
     if let Some(margin) = margin_value {
         details.push(
             margin
-                .strip_prefix("reset margin: ")
+                .strip_prefix("weekly margin ")
                 .map_or_else(|| margin.to_string(), |margin| format!("margin {margin}")),
         );
     }
@@ -618,7 +618,7 @@ mod tests {
 
         assert_eq!(
             format_quota_runway(Some(&window), now),
-            "weekly runway: ~1d 12h"
+            "weekly runway ~1d 12h"
         );
     }
 
@@ -626,17 +626,11 @@ mod tests {
     fn quota_runway_is_unavailable_without_a_meaningful_rate() {
         let now = Local::now();
         let mut window = window(0.0);
-        assert_eq!(
-            format_quota_runway(Some(&window), now),
-            "weekly runway: n/a"
-        );
+        assert_eq!(format_quota_runway(Some(&window), now), "weekly runway n/a");
 
         window.used_percent = 50.0;
-        assert_eq!(
-            format_quota_runway(Some(&window), now),
-            "weekly runway: n/a"
-        );
-        assert_eq!(format_quota_runway(None, now), "weekly runway: n/a");
+        assert_eq!(format_quota_runway(Some(&window), now), "weekly runway n/a");
+        assert_eq!(format_quota_runway(None, now), "weekly runway n/a");
     }
 
     #[test]
@@ -651,7 +645,7 @@ mod tests {
 
         assert_eq!(
             format_quota_margin(Some(&window), now),
-            "reset margin: -4d 0h"
+            "weekly margin -4d 0h"
         );
     }
 

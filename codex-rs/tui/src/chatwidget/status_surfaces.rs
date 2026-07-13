@@ -840,7 +840,7 @@ impl ChatWidget {
                     .get("codex")
                     .and_then(weekly_status_window)
                     .map(|(window, _)| window),
-                "Week reset",
+                "weekly reset",
             ),
             StatusLineItem::WeeklyQuotaRunway => Some(format_quota_runway(
                 self.rate_limit_snapshots_by_limit_id

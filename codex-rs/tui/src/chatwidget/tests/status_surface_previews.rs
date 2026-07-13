@@ -25,6 +25,17 @@ fn status_preview_line(chat: &mut ChatWidget, items: &[StatusLineItem]) -> Strin
     status_preview_line_option(chat, items).expect("status preview line")
 }
 
+fn status_preview_line_without_merges(chat: &mut ChatWidget, items: &[StatusLineItem]) -> String {
+    let segments = items.iter().filter_map(|item| {
+        chat.status_line_value_for_item(*item)
+            .map(|value| (*item, value))
+    });
+    line_text(
+        crate::bottom_pane::status_line_from_segments(segments, /*use_theme_colors*/ true)
+            .expect("status preview line"),
+    )
+}
+
 fn title_preview_line(chat: &mut ChatWidget, items: &[TerminalTitleItem]) -> String {
     let preview_data = chat.terminal_title_preview_data();
     let preview =
@@ -426,7 +437,7 @@ async fn status_line_renders_rate_limit_reset_countdowns() {
                 StatusLineItem::WeeklyLimitResetIn,
             ]
         ),
-        "5h reset 1h 42m · Week reset 3d 8h"
+        "5h reset 1h 42m · weekly reset 3d 8h"
     );
 }
 
@@ -474,6 +485,52 @@ async fn status_line_merges_adjacent_rate_limit_reset_countdowns() {
 }
 
 #[tokio::test]
+async fn status_line_preview_script() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let now = Local::now();
+    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        primary: Some(RateLimitWindow {
+            used_percent: 47,
+            window_duration_mins: Some(5 * 60),
+            resets_at: Some(
+                (now + ChronoDuration::minutes(102) + ChronoDuration::seconds(5)).timestamp(),
+            ),
+        }),
+        secondary: Some(RateLimitWindow {
+            used_percent: 7,
+            window_duration_mins: Some(7 * 24 * 60),
+            resets_at: Some(
+                (now + ChronoDuration::hours(157)
+                    + ChronoDuration::minutes(45)
+                    + ChronoDuration::seconds(5))
+                .timestamp(),
+            ),
+        }),
+        credits: None,
+        individual_limit: None,
+        plan_type: None,
+        rate_limit_reached_type: None,
+    }));
+
+    let items = [
+        StatusLineItem::FiveHourLimit,
+        StatusLineItem::FiveHourLimitResetIn,
+        StatusLineItem::WeeklyLimit,
+        StatusLineItem::WeeklyLimitResetIn,
+        StatusLineItem::WeeklyQuotaRunway,
+        StatusLineItem::WeeklyLimitMargin,
+    ];
+    println!("STATUSLINE_PREVIEW_NON_GROUPED_BEGIN");
+    println!("{}", status_preview_line_without_merges(&mut chat, &items));
+    println!("STATUSLINE_PREVIEW_NON_GROUPED_END");
+    println!("STATUSLINE_PREVIEW_GROUPED_BEGIN");
+    println!("{}", status_preview_line(&mut chat, &items));
+    println!("STATUSLINE_PREVIEW_GROUPED_END");
+}
+
+#[tokio::test]
 async fn status_line_does_not_merge_non_adjacent_rate_limit_reset_countdowns() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let now = Local::now();
@@ -508,7 +565,7 @@ async fn status_line_does_not_merge_non_adjacent_rate_limit_reset_countdowns() {
                 StatusLineItem::FiveHourLimit,
             ],
         ),
-        "Week reset 3d 8h · 5h 53% left"
+        "weekly reset 3d 8h · 5h 53% left"
     );
 }
 

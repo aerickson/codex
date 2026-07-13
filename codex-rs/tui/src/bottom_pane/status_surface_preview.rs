@@ -66,9 +66,9 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
-            StatusSurfacePreviewItem::WeeklyLimitResetIn => "Week reset 3d 8h",
-            StatusSurfacePreviewItem::WeeklyQuotaRunway => "weekly runway: ~18h",
-            StatusSurfacePreviewItem::WeeklyLimitMargin => "reset margin: -21h",
+            StatusSurfacePreviewItem::WeeklyLimitResetIn => "weekly reset 3d 8h",
+            StatusSurfacePreviewItem::WeeklyQuotaRunway => "weekly runway ~18h",
+            StatusSurfacePreviewItem::WeeklyLimitMargin => "weekly margin -21h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
@@ -326,17 +326,17 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
             name: "five-hour-limit-reset-in",
             description: "Time until the 5-hour usage limit resets (omitted when unavailable)",
         })
-    } else if value.starts_with("Week reset ") {
+    } else if value.starts_with("weekly reset ") {
         Some(RateLimitPreviewCopy {
             name: "weekly-limit-reset-in",
             description: "Time until the weekly usage limit resets (omitted when unavailable)",
         })
-    } else if value.starts_with("weekly runway: ") {
+    } else if value.starts_with("weekly runway ") {
         Some(RateLimitPreviewCopy {
             name: "weekly-limit-runway",
             description: "Estimated time until the weekly quota is exhausted at the current usage rate",
         })
-    } else if value.starts_with("reset margin: ") {
+    } else if value.starts_with("weekly margin ") {
         Some(RateLimitPreviewCopy {
             name: "weekly-limit-margin",
             description: "Difference between projected weekly quota exhaustion and reset time",
