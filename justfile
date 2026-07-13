@@ -53,7 +53,7 @@ deploy-next:
 [unix]
 sign-binary binary:
     @test -n "`security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1`" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; \
-    codesign --force --timestamp --sign "`security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1`" "{{binary}}"
+    codesign --force --timestamp --sign "`security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1`" "{{ binary }}"
 
 # Sign the staged local deployment in place.
 [unix]
