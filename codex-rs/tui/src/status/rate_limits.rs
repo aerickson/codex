@@ -134,34 +134,62 @@ pub(crate) fn format_quota_runway(
     window: Option<&RateLimitWindowDisplay>,
     now: DateTime<Local>,
 ) -> String {
-    let Some(window) = window else {
+    let Some(runway_seconds) = quota_runway_seconds(window, now) else {
         return "weekly runway: n/a".to_string();
     };
-    let Some(window_minutes) = window.window_minutes else {
-        return "weekly runway: n/a".to_string();
+    let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
+        .unwrap_or_else(|| "0m".to_string());
+    format!("weekly runway: ~{runway}")
+}
+
+/// Formats the signed difference between projected quota exhaustion and the reset time.
+pub(crate) fn format_quota_margin(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> String {
+    let Some(window) = window else {
+        return "reset margin: n/a".to_string();
     };
     let Some(reset_at) = window.reset_at else {
-        return "weekly runway: n/a".to_string();
+        return "reset margin: n/a".to_string();
     };
+    let Some(runway_seconds) = quota_runway_seconds(Some(window), now) else {
+        return "reset margin: n/a".to_string();
+    };
+
+    let margin_seconds = runway_seconds - reset_at.signed_duration_since(now).num_seconds();
+    let sign = if margin_seconds < 0 { "-" } else { "+" };
+    let margin = format_reset_countdown(
+        Some(now + ChronoDuration::seconds(margin_seconds.abs())),
+        now,
+    )
+    .unwrap_or_else(|| "0m".to_string());
+    format!("reset margin: {sign}{margin}")
+}
+
+fn quota_runway_seconds(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> Option<i64> {
+    let window = window?;
+    let window_minutes = window.window_minutes?;
+    let reset_at = window.reset_at?;
     if !window.used_percent.is_finite() || window.used_percent <= 0.0 {
-        return "weekly runway: n/a".to_string();
+        return None;
     }
 
     let window_seconds = window_minutes.saturating_mul(60);
     let seconds_until_reset = reset_at.signed_duration_since(now).num_seconds();
     let elapsed_seconds = window_seconds.saturating_sub(seconds_until_reset);
     if elapsed_seconds <= 0 {
-        return "weekly runway: n/a".to_string();
+        return None;
     }
 
-    let runway_seconds = if window.used_percent >= 100.0 {
+    Some(if window.used_percent >= 100.0 {
         0
     } else {
         ((100.0 - window.used_percent) / window.used_percent * elapsed_seconds as f64) as i64
-    };
-    let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
-        .unwrap_or_else(|| "0m".to_string());
-    format!("weekly runway: ~{runway}")
+    })
 }
 
 /// Merges a percentage-usage value with its adjacent reset countdown, e.g.
@@ -186,18 +214,30 @@ pub(crate) fn merge_weekly_quota(
     value: &str,
     reset_value: Option<&str>,
     runway_value: Option<&str>,
+    margin_value: Option<&str>,
 ) -> String {
     let value = merge_reset_countdown(value, reset_value, "Week reset ");
-    let Some(runway) = runway_value else {
-        return value;
-    };
-    let runway = runway
-        .strip_prefix("weekly runway: ")
-        .map_or_else(|| runway.to_string(), |runway| format!("runway {runway}"));
-    if reset_value.is_some() {
-        format!("{}; {runway})", value.trim_end_matches(')'))
+    let mut details = Vec::new();
+    if let Some(runway) = runway_value {
+        details.push(
+            runway
+                .strip_prefix("weekly runway: ")
+                .map_or_else(|| runway.to_string(), |runway| format!("runway {runway}")),
+        );
+    }
+    if let Some(margin) = margin_value {
+        details.push(
+            margin
+                .strip_prefix("reset margin: ")
+                .map_or_else(|| margin.to_string(), |margin| format!("margin {margin}")),
+        );
+    }
+    if details.is_empty() {
+        value
+    } else if reset_value.is_some() {
+        format!("{}; {})", value.trim_end_matches(')'), details.join("; "))
     } else {
-        format!("{value} ({runway})")
+        format!("{value} ({})", details.join("; "))
     }
 }
 
@@ -532,6 +572,7 @@ mod tests {
     use super::RateLimitWindowDisplay;
     use super::StatusRateLimitData;
     use super::compose_rate_limit_data_many;
+    use super::format_quota_margin;
     use super::format_quota_runway;
     use super::format_reset_countdown;
     use chrono::Duration as ChronoDuration;
@@ -596,6 +637,22 @@ mod tests {
             "weekly runway: n/a"
         );
         assert_eq!(format_quota_runway(None, now), "weekly runway: n/a");
+    }
+
+    #[test]
+    fn quota_margin_compares_runway_with_reset_time() {
+        let now = Local::now();
+        let window = RateLimitWindowDisplay {
+            used_percent: 50.0,
+            resets_at: Some("soon".to_string()),
+            reset_at: Some(now + ChronoDuration::hours(132)),
+            window_minutes: Some(7 * 24 * 60),
+        };
+
+        assert_eq!(
+            format_quota_margin(Some(&window), now),
+            "reset margin: -4d 0h"
+        );
     }
 
     #[test]

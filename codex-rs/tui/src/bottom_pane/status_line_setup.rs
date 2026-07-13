@@ -120,8 +120,12 @@ pub(crate) enum StatusLineItem {
     WeeklyLimitResetIn,
 
     /// Estimated time until the weekly quota is exhausted at the current usage rate.
-    #[strum(to_string = "wquota-runway")]
+    #[strum(to_string = "weekly-limit-runway", serialize = "wquota-runway")]
     WeeklyQuotaRunway,
+
+    /// Difference between projected weekly quota exhaustion and the reset time.
+    #[strum(to_string = "weekly-limit-margin", serialize = "weekly-reset-margin")]
+    WeeklyLimitMargin,
 
     /// Codex application version.
     CodexVersion,
@@ -205,6 +209,9 @@ impl StatusLineItem {
             StatusLineItem::WeeklyQuotaRunway => {
                 "Estimated time until the weekly quota is exhausted at the current usage rate"
             }
+            StatusLineItem::WeeklyLimitMargin => {
+                "Difference between projected weekly quota exhaustion and reset time"
+            }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
@@ -254,6 +261,7 @@ impl StatusLineItem {
             StatusLineItem::FiveHourLimitResetIn => StatusSurfacePreviewItem::FiveHourLimitResetIn,
             StatusLineItem::WeeklyLimitResetIn => StatusSurfacePreviewItem::WeeklyLimitResetIn,
             StatusLineItem::WeeklyQuotaRunway => StatusSurfacePreviewItem::WeeklyQuotaRunway,
+            StatusLineItem::WeeklyLimitMargin => StatusSurfacePreviewItem::WeeklyLimitMargin,
             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
             StatusLineItem::ContextWindowSize => StatusSurfacePreviewItem::ContextWindowSize,
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,
@@ -397,7 +405,9 @@ impl StatusLineSetupView {
             StatusLineItem::FiveHourLimit
             | StatusLineItem::WeeklyLimit
             | StatusLineItem::FiveHourLimitResetIn
-            | StatusLineItem::WeeklyLimitResetIn => (
+            | StatusLineItem::WeeklyLimitResetIn
+            | StatusLineItem::WeeklyQuotaRunway
+            | StatusLineItem::WeeklyLimitMargin => (
                 preview_data.rate_limit_item_name(item.preview_item(), &default_name),
                 preview_data.rate_limit_item_description(item.preview_item(), default_description),
             ),
@@ -567,6 +577,22 @@ mod tests {
         assert_eq!(
             "weekly-limit-reset-in".parse::<StatusLineItem>(),
             Ok(StatusLineItem::WeeklyLimitResetIn)
+        );
+        assert_eq!(
+            "weekly-limit-runway".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyQuotaRunway)
+        );
+        assert_eq!(
+            "wquota-runway".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyQuotaRunway)
+        );
+        assert_eq!(
+            "weekly-limit-margin".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitMargin)
+        );
+        assert_eq!(
+            "weekly-reset-margin".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitMargin)
         );
     }
 

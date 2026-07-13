@@ -466,9 +466,10 @@ async fn status_line_merges_adjacent_rate_limit_reset_countdowns() {
                 StatusLineItem::WeeklyLimit,
                 StatusLineItem::WeeklyLimitResetIn,
                 StatusLineItem::WeeklyQuotaRunway,
+                StatusLineItem::WeeklyLimitMargin,
             ],
         ),
-        "5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~48d 17h)"
+        "5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~48d 17h; margin +45d 9h)"
     );
 }
 

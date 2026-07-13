@@ -11,6 +11,7 @@ use crate::chatwidget::rate_limits::get_limits_duration;
 use crate::legacy_core::config::Config;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
+use crate::status::format_quota_margin;
 use crate::status::format_quota_runway;
 use crate::status::format_reset_countdown;
 use crate::status::format_tokens_compact;
@@ -232,7 +233,16 @@ impl ChatWidget {
                             == Some(&StatusLineItem::WeeklyQuotaRunway))
                         .then(|| self.status_line_value_for_item(StatusLineItem::WeeklyQuotaRunway))
                         .flatten();
-                        merge_weekly_quota(&value, reset.as_deref(), runway.as_deref())
+                        let margin = (selections.status_line_items.get(index + 3)
+                            == Some(&StatusLineItem::WeeklyLimitMargin))
+                        .then(|| self.status_line_value_for_item(StatusLineItem::WeeklyLimitMargin))
+                        .flatten();
+                        merge_weekly_quota(
+                            &value,
+                            reset.as_deref(),
+                            runway.as_deref(),
+                            margin.as_deref(),
+                        )
                     }
                     StatusLineItem::FiveHourLimitResetIn
                         if index > 0
@@ -247,6 +257,17 @@ impl ChatWidget {
                                 == StatusLineItem::WeeklyLimit
                             && selections.status_line_items[index - 1]
                                 == StatusLineItem::WeeklyLimitResetIn =>
+                    {
+                        continue;
+                    }
+                    StatusLineItem::WeeklyLimitMargin
+                        if index >= 3
+                            && selections.status_line_items[index - 3]
+                                == StatusLineItem::WeeklyLimit
+                            && selections.status_line_items[index - 2]
+                                == StatusLineItem::WeeklyLimitResetIn
+                            && selections.status_line_items[index - 1]
+                                == StatusLineItem::WeeklyQuotaRunway =>
                     {
                         continue;
                     }
@@ -828,6 +849,13 @@ impl ChatWidget {
                     .map(|(window, _)| window),
                 Local::now(),
             )),
+            StatusLineItem::WeeklyLimitMargin => Some(format_quota_margin(
+                self.rate_limit_snapshots_by_limit_id
+                    .get("codex")
+                    .and_then(weekly_quota_status_window)
+                    .map(|(window, _)| window),
+                Local::now(),
+            )),
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
@@ -928,6 +956,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::FiveHourLimitResetIn => StatusLineItem::FiveHourLimitResetIn,
             StatusSurfacePreviewItem::WeeklyLimitResetIn => StatusLineItem::WeeklyLimitResetIn,
             StatusSurfacePreviewItem::WeeklyQuotaRunway => StatusLineItem::WeeklyQuotaRunway,
+            StatusSurfacePreviewItem::WeeklyLimitMargin => StatusLineItem::WeeklyLimitMargin,
             StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,

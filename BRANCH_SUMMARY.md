@@ -18,7 +18,10 @@ The rate-limit `tui.status_line` items are:
 
 - `five-hour-limit-reset-in` (new)
 - `weekly-limit-reset-in` (new)
-- `wquota-runway` (new; estimated time until the weekly quota is exhausted at the current usage rate)
+- `weekly-limit-runway` (new; estimated time until the weekly quota is exhausted at the current usage rate)
+- `weekly-limit-margin` (new; signed difference between projected exhaustion and reset time)
+
+The legacy `wquota-runway` identifier remains accepted as an alias for `weekly-limit-runway`.
 
 When a reset item immediately follows its matching percentage item, the two indicators are
 rendered as one segment. When the weekly runway immediately follows that pair, it is included in
@@ -32,7 +35,8 @@ status_line = [
   "five-hour-limit-reset-in",
   "weekly-limit",
   "weekly-limit-reset-in",
-  "wquota-runway",
+  "weekly-limit-runway",
+  "weekly-limit-margin",
 ]
 ```
 
@@ -45,10 +49,11 @@ V1 rendered the indicators as separate segments:
 V2 merges each reset countdown into its matching percentage item:
 
 ```text
-5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~18h)
+5h 53% left (reset 1h 42m) · weekly 93% left (reset 3d 8h; runway ~18h; margin -2d 14h)
 ```
 
-When shown alone, the runway is labeled `weekly runway: ~18h`.
+When shown alone, the runway is labeled `weekly runway: ~18h` and the margin is labeled
+`reset margin: -2d 14h`.
 
 Missing or expired reset timestamps omit the corresponding countdown item. Countdown redraws are
 scheduled at minute boundaries. The runway is shown as `n/a` when the weekly window or a
