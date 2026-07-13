@@ -26,6 +26,7 @@ pub(crate) enum StatusSurfacePreviewItem {
     WeeklyLimit,
     FiveHourLimitResetIn,
     WeeklyLimitResetIn,
+    WeeklyQuotaRunway,
     CodexVersion,
     ContextWindowSize,
     UsedTokens,
@@ -64,6 +65,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
             StatusSurfacePreviewItem::WeeklyLimitResetIn => "Week reset 3d 8h",
+            StatusSurfacePreviewItem::WeeklyQuotaRunway => "WQuota runway: ~18h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
@@ -102,6 +104,7 @@ impl StatusSurfacePreviewItem {
             Self::WeeklyLimit,
             Self::FiveHourLimitResetIn,
             Self::WeeklyLimitResetIn,
+            Self::WeeklyQuotaRunway,
             Self::CodexVersion,
             Self::ContextWindowSize,
             Self::UsedTokens,
@@ -302,6 +305,11 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
         Some(RateLimitPreviewCopy {
             name: "weekly-limit-reset-in",
             description: "Time until the weekly usage limit resets (omitted when unavailable)",
+        })
+    } else if value.starts_with("WQuota runway: ") {
+        Some(RateLimitPreviewCopy {
+            name: "wquota-runway",
+            description: "Estimated time until the weekly quota is exhausted at the current usage rate",
         })
     } else if value.starts_with("5h ") {
         Some(RateLimitPreviewCopy {

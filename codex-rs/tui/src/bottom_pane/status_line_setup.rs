@@ -119,6 +119,10 @@ pub(crate) enum StatusLineItem {
     /// Countdown until the secondary rate limit resets.
     WeeklyLimitResetIn,
 
+    /// Estimated time until the weekly quota is exhausted at the current usage rate.
+    #[strum(to_string = "wquota-runway")]
+    WeeklyQuotaRunway,
+
     /// Codex application version.
     CodexVersion,
 
@@ -198,6 +202,9 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimitResetIn => {
                 "Time until the weekly usage limit resets (omitted when unavailable)"
             }
+            StatusLineItem::WeeklyQuotaRunway => {
+                "Estimated time until the weekly quota is exhausted at the current usage rate"
+            }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
@@ -246,6 +253,7 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => StatusSurfacePreviewItem::WeeklyLimit,
             StatusLineItem::FiveHourLimitResetIn => StatusSurfacePreviewItem::FiveHourLimitResetIn,
             StatusLineItem::WeeklyLimitResetIn => StatusSurfacePreviewItem::WeeklyLimitResetIn,
+            StatusLineItem::WeeklyQuotaRunway => StatusSurfacePreviewItem::WeeklyQuotaRunway,
             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
             StatusLineItem::ContextWindowSize => StatusSurfacePreviewItem::ContextWindowSize,
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,

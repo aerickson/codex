@@ -129,6 +129,41 @@ pub(crate) fn format_reset_countdown(
     }
 }
 
+/// Estimates how long a usage window will last if its current consumption rate continues.
+pub(crate) fn format_quota_runway(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> String {
+    let Some(window) = window else {
+        return "WQuota runway: n/a".to_string();
+    };
+    let Some(window_minutes) = window.window_minutes else {
+        return "WQuota runway: n/a".to_string();
+    };
+    let Some(reset_at) = window.reset_at else {
+        return "WQuota runway: n/a".to_string();
+    };
+    if !window.used_percent.is_finite() || window.used_percent <= 0.0 {
+        return "WQuota runway: n/a".to_string();
+    }
+
+    let window_seconds = window_minutes.saturating_mul(60);
+    let seconds_until_reset = reset_at.signed_duration_since(now).num_seconds();
+    let elapsed_seconds = window_seconds.saturating_sub(seconds_until_reset);
+    if elapsed_seconds <= 0 {
+        return "WQuota runway: n/a".to_string();
+    }
+
+    let runway_seconds = if window.used_percent >= 100.0 {
+        0
+    } else {
+        ((100.0 - window.used_percent) / window.used_percent * elapsed_seconds as f64) as i64
+    };
+    let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
+        .unwrap_or_else(|| "0m".to_string());
+    format!("WQuota runway: ~{runway}")
+}
+
 /// Merges a percentage-usage value with its adjacent reset countdown, e.g.
 /// `"5h 53% left"` + `"5h reset 1h 42m"` -> `"5h 53% left (reset 1h 42m)"`.
 ///
@@ -477,6 +512,7 @@ mod tests {
     use super::RateLimitWindowDisplay;
     use super::StatusRateLimitData;
     use super::compose_rate_limit_data_many;
+    use super::format_quota_runway;
     use super::format_reset_countdown;
     use chrono::Duration as ChronoDuration;
     use chrono::Local;
@@ -507,6 +543,39 @@ mod tests {
             format_reset_countdown(Some(now - ChronoDuration::seconds(1)), now),
             None
         );
+    }
+
+    #[test]
+    fn quota_runway_projects_from_elapsed_window_and_usage() {
+        let now = Local::now();
+        let window = RateLimitWindowDisplay {
+            used_percent: 50.0,
+            resets_at: Some("soon".to_string()),
+            reset_at: Some(now + ChronoDuration::hours(132)),
+            window_minutes: Some(7 * 24 * 60),
+        };
+
+        assert_eq!(
+            format_quota_runway(Some(&window), now),
+            "WQuota runway: ~1d 12h"
+        );
+    }
+
+    #[test]
+    fn quota_runway_is_unavailable_without_a_meaningful_rate() {
+        let now = Local::now();
+        let mut window = window(0.0);
+        assert_eq!(
+            format_quota_runway(Some(&window), now),
+            "WQuota runway: n/a"
+        );
+
+        window.used_percent = 50.0;
+        assert_eq!(
+            format_quota_runway(Some(&window), now),
+            "WQuota runway: n/a"
+        );
+        assert_eq!(format_quota_runway(None, now), "WQuota runway: n/a");
     }
 
     #[test]
