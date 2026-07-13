@@ -66,8 +66,11 @@ promote-next:
     cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje.tmp"
     mv -f "$HOME/bin/codex-aje.tmp" "$HOME/bin/codex-aje"
 
-# Show the versions and fast checksums of the staged and active local deployments.
+# Show deployment versions, build commits, and changes since each build.
 deployment-status:
+    @python3 "{{ justfile_directory() }}/scripts/deployment-status.py"
+
+_deployment-status-legacy:
     @if test -t 1; then \
         bold=$(printf '\033[1m'); \
         cyan=$(printf '\033[36m'); \
@@ -77,6 +80,7 @@ deployment-status:
     else \
         bold=; cyan=; green=; yellow=; reset=; \
     fi; \
+    head_commit=$(git rev-parse --verify HEAD 2>/dev/null || true); \
     printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$bold" Deployment "$reset" Binary Version Checksum Modified; \
     printf '%-10s  %-18s  %-32s  %-10s  %s\n' '----------' '------------------' '--------------------------------' '----------' '-------------------'; \
     for deployment in staged active; do \
@@ -89,6 +93,27 @@ deployment-status:
             checksum=$(cksum "$bin" | awk '{print $1}'); \
             modified=$(date -r "$bin" '+%Y-%m-%d %H:%M:%S %z'); \
             printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$cyan" "$deployment" "$reset" "$(basename "$bin")" "$version" "$checksum" "$modified"; \
+            build_commit=$(printf '%s\n' "$version" | sed -E 's/.*+([[:xdigit:]]{8,40})$/\1/p'); \
+            resolved_build_commit=$(git rev-parse --verify "${build_commit}^{commit}" 2>/dev/null || true); \
+            if test -n "$resolved_build_commit" && test -n "$head_commit"; then \
+                commits_since_build=$(git rev-list --count "$resolved_build_commit..$head_commit"); \
+                printf '  built commit: %-12s  commits since build: %-4s  git diff: %s..HEAD\n' "$build_commit" "$commits_since_build" "$build_commit"; \
+            else \
+                printf '  built commit: %-12s  commits since build: %-4s  git diff: unavailable\n' "${build_commit:-unknown}" '-' ; \
+            fi; \
+            if command -v codesign >/dev/null 2>&1; then \
+                signing_info=$(codesign -dv --verbose=2 "$bin" 2>&1 || true); \
+                identity=$(printf '%s\n' "$signing_info" | sed -n 's/^Authority=//p' | head -n 1); \
+                team_id=$(printf '%s\n' "$signing_info" | sed -n 's/^TeamIdentifier=//p' | head -n 1); \
+                cdhash=$(printf '%s\n' "$signing_info" | sed -n 's/^CDHash=//p' | head -n 1); \
+                if test -n "$identity"; then \
+                    printf '  signing: signed  identity: %s  team: %s  cdhash: %s\n' "$identity" "${team_id:--}" "${cdhash:--}"; \
+                else \
+                    printf '  signing: unsigned\n'; \
+                fi; \
+            else \
+                printf '  signing: unavailable (codesign not found)\n'; \
+            fi; \
         else \
             printf '%s%-10s%s  %-18s  %s%-32s%s  %-10s  %s\n' "$yellow" "$deployment" "$reset" "$(basename "$bin")" "$yellow" missing "$reset" '-' '-'; \
         fi; \
