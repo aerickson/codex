@@ -12,6 +12,7 @@ use crate::legacy_core::config::Config;
 use crate::model_catalog::LUNA_RESERVE_MODEL;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
+use crate::status::format_quota_runway;
 use crate::status::format_reset_countdown;
 use crate::status::format_tokens_compact;
 use crate::status::merge_reset_countdown;
@@ -871,6 +872,13 @@ impl ChatWidget {
                     .map(|(window, _)| window),
                 "Week reset",
             ),
+            StatusLineItem::WeeklyQuotaRunway => Some(format_quota_runway(
+                self.rate_limit_snapshots_by_limit_id
+                    .get("codex")
+                    .and_then(weekly_quota_status_window)
+                    .map(|(window, _)| window),
+                Local::now(),
+            )),
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
@@ -964,6 +972,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::WeeklyLimit => StatusLineItem::WeeklyLimit,
             StatusSurfacePreviewItem::FiveHourLimitResetIn => StatusLineItem::FiveHourLimitResetIn,
             StatusSurfacePreviewItem::WeeklyLimitResetIn => StatusLineItem::WeeklyLimitResetIn,
+            StatusSurfacePreviewItem::WeeklyQuotaRunway => StatusLineItem::WeeklyQuotaRunway,
             StatusSurfacePreviewItem::CodexVersion => StatusLineItem::CodexVersion,
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
@@ -1237,6 +1246,12 @@ fn weekly_status_window(
 ) -> Option<(&RateLimitWindowDisplay, bool)> {
     find_codex_window(snapshot, "weekly")
         .or_else(|| snapshot.secondary.as_ref().map(|window| (window, true)))
+}
+
+fn weekly_quota_status_window(
+    snapshot: &RateLimitSnapshotDisplay,
+) -> Option<(&RateLimitWindowDisplay, bool)> {
+    find_codex_window(snapshot, "weekly")
 }
 
 fn find_codex_window<'a>(
