@@ -1782,11 +1782,13 @@ async fn transcript_overlay_remeasures_status_after_rate_limit_refresh() {
             primary: Some(RateLimitWindowDisplay {
                 used_percent: 45.0,
                 resets_at: Some("soon".to_string()),
+                reset_at: None,
                 window_minutes: Some(300),
             }),
             secondary: Some(RateLimitWindowDisplay {
                 used_percent: 30.0,
                 resets_at: Some("later".to_string()),
+                reset_at: None,
                 window_minutes: Some(10_080),
             }),
             credits: None,
