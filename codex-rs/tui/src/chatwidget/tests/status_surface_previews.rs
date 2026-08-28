@@ -1,9 +1,9 @@
 use super::*;
 use crate::bottom_pane::preview_line_for_title_items;
 use crate::chatwidget::ThreadUsageOutcome;
-use codex_app_server_protocol::ThreadUsage;
 use chrono::Duration as ChronoDuration;
 use chrono::Local;
+use codex_app_server_protocol::ThreadUsage;
 use pretty_assertions::assert_eq;
 use ratatui::text::Line;
 
@@ -470,6 +470,7 @@ async fn status_line_renders_rate_limit_reset_countdowns() {
         }),
         credits: None,
         individual_limit: None,
+        spend_control_reached: None,
         plan_type: None,
         rate_limit_reached_type: None,
     }));
@@ -509,6 +510,7 @@ async fn status_line_merges_adjacent_rate_limit_reset_countdowns() {
         }),
         credits: None,
         individual_limit: None,
+        spend_control_reached: None,
         plan_type: None,
         rate_limit_reached_type: None,
     }));
@@ -555,6 +557,7 @@ async fn status_line_preview_script() {
         }),
         credits: None,
         individual_limit: None,
+        spend_control_reached: None,
         plan_type: None,
         rate_limit_reached_type: None,
     }));
@@ -598,6 +601,7 @@ async fn status_line_does_not_merge_non_adjacent_rate_limit_reset_countdowns() {
         }),
         credits: None,
         individual_limit: None,
+        spend_control_reached: None,
         plan_type: None,
         rate_limit_reached_type: None,
     }));
