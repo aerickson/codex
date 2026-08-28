@@ -1,0 +1,59 @@
+# AJE-local recipes. Keep this file separate from the repository justfile so
+# rebases of upstream justfile changes cannot overwrite the local workflow.
+set working-directory := "codex-rs"
+set positional-arguments
+
+rust_min_stack := "8388608" # 8 MiB
+
+# Show the recipes in this local justfile.
+help:
+    just --justfile {{ justfile_directory() }}/justfile.aje --list
+
+# Build the optimized local CLI binary.
+[unix]
+build:
+    nice -n 10 cargo build -p codex-cli --release
+
+[windows]
+build:
+    cargo build -p codex-cli --release
+
+# Run the requested tests with the repository's usual local settings.
+[unix]
+test *args:
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+
+[windows]
+test *args:
+    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast @args
+
+# Copy the validated release binary into the staged local deployment slot.
+[unix]
+deploy-next:
+    mkdir -p "$HOME/bin"
+    cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-aje-next.tmp"
+    mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+[windows]
+deploy-next:
+    New-Item -ItemType Directory -Force "$HOME/bin" | Out-Null
+    Copy-Item target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    Move-Item -Force "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+# Sign a local macOS binary with the first available Developer ID identity.
+[unix]
+sign-binary binary:
+    @identity=$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1); test -n "$identity" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; codesign --force --timestamp --sign "$identity" "{{ binary }}"
+
+# Sign the staged local deployment in place.
+[unix]
+sign-next:
+    just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-aje-next"
+
+# Promote the staged local binary to the active local deployment.
+[unix]
+promote-next:
+    test -x "$HOME/bin/codex-aje-next"
+    cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje.tmp"
+    mv -f "$HOME/bin/codex-aje.tmp" "$HOME/bin/codex-aje"
