@@ -26,7 +26,7 @@ build:
 # Build the companion executable used by the optional Code Mode feature.
 [unix]
 build-code-mode-host:
-    V8_FROM_SOURCE=1 cargo build -p codex-code-mode-host --release
+    V8_FROM_SOURCE=1 nice -n 10 cargo build -p codex-code-mode-host --release
 
 [windows]
 build-code-mode-host:
