@@ -11,8 +11,8 @@ help:
 
 # Build the optimized local CLI binary.
 [unix]
-build:
-    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; V8_FROM_SOURCE=1 CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
+build: setup-rusty-v8
+    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
 
 [windows]
 build:
@@ -25,19 +25,24 @@ build:
 
 # Build the companion executable used by the optional Code Mode feature.
 [unix]
-build-code-mode-host:
-    V8_FROM_SOURCE=1 nice -n 10 cargo build -p codex-code-mode-host --release
+build-code-mode-host: setup-rusty-v8
+    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" nice -n 10 cargo build -p codex-code-mode-host --release
 
 [windows]
 build-code-mode-host:
     cargo build -p codex-code-mode-host --release
 
+# Cache the matching Codex-published Rusty V8 archive and bindings for macOS.
+[unix]
+setup-rusty-v8:
+    mkdir -p "$HOME/.cache/codex-aje/rusty-v8-150.4.0"
+    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz"
+    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs"
+
 # Run the requested tests with the repository's usual local settings.
 [unix]
-test *args:
-    # v8 v150.4.0 does not publish the sandboxed macOS ARM64 Cargo archive;
-    # build it locally instead of asking the upstream downloader for a 404.
-    V8_FROM_SOURCE=1 RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+test *args: setup-rusty-v8
+    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
