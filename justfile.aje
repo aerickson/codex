@@ -23,6 +23,10 @@ build:
     $dirty = if (git diff --quiet HEAD --) { "" } else { ".dirty" }
     $env:CODEX_AJE_VERSION = "$releaseVersion-aje+g$sha$dirty"; $env:CODEX_BUILD_VERSION = "$releaseVersion-aje+g$sha$dirty"; cargo build -p codex-cli --release
 
+# Build the companion executable used by the optional Code Mode feature.
+build-code-mode-host:
+    cargo build -p codex-code-mode-host --release
+
 # Run the requested tests with the repository's usual local settings.
 [unix]
 test *args:
@@ -36,17 +40,22 @@ test *args:
 
 # Copy the validated release binary into the staged local deployment slot.
 [unix]
-deploy-next:
+deploy-next: build build-code-mode-host
     mkdir -p "$HOME/bin"
     cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
     just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-aje-next.tmp"
     mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+    cp target/release/codex-code-mode-host "$HOME/bin/codex-code-mode-host.tmp"
+    just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-code-mode-host.tmp"
+    mv -f "$HOME/bin/codex-code-mode-host.tmp" "$HOME/bin/codex-code-mode-host"
 
 [windows]
-deploy-next:
+deploy-next: build build-code-mode-host
     New-Item -ItemType Directory -Force "$HOME/bin" | Out-Null
     Copy-Item target/release/codex "$HOME/bin/codex-aje-next.tmp"
     Move-Item -Force "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+    Copy-Item target/release/codex-code-mode-host "$HOME/bin/codex-code-mode-host.tmp"
+    Move-Item -Force "$HOME/bin/codex-code-mode-host.tmp" "$HOME/bin/codex-code-mode-host"
 
 # Sign a local macOS binary with the first available Developer ID identity.
 [unix]
