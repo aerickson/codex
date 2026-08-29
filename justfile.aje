@@ -12,7 +12,7 @@ help:
 # Build the optimized local CLI binary.
 [unix]
 build:
-    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
+    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; V8_FROM_SOURCE=1 CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
 
 [windows]
 build:
@@ -24,6 +24,11 @@ build:
     $env:CODEX_AJE_VERSION = "$releaseVersion-aje+g$sha$dirty"; $env:CODEX_BUILD_VERSION = "$releaseVersion-aje+g$sha$dirty"; cargo build -p codex-cli --release
 
 # Build the companion executable used by the optional Code Mode feature.
+[unix]
+build-code-mode-host:
+    V8_FROM_SOURCE=1 cargo build -p codex-code-mode-host --release
+
+[windows]
 build-code-mode-host:
     cargo build -p codex-code-mode-host --release
 
