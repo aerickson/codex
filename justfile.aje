@@ -26,7 +26,9 @@ build:
 # Run the requested tests with the repository's usual local settings.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+    # v8 v150.4.0 does not publish the sandboxed macOS ARM64 Cargo archive;
+    # build it locally instead of asking the upstream downloader for a 404.
+    V8_FROM_SOURCE=1 RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:

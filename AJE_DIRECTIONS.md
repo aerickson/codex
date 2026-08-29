@@ -7,8 +7,8 @@ This file is intentionally unversioned and is for local deployment notes.
 From the repository root:
 
 ```sh
-nice -n 10 just --justfile justfile.aje build
-just --justfile justfile.aje test -p codex-tui
+nice -n 10 ./justa build
+./justa test -p codex-tui
 ```
 
 The resulting binary is:
@@ -22,14 +22,14 @@ codex-rs/target/release/codex
 Stage the validated release binary with:
 
 ```sh
-just --justfile justfile.aje deploy-next
+./justa deploy-next
 ```
 
 This copies the binary to `~/bin/codex-aje-next` using an atomic rename so macOS does not reuse
 the previous executable's signature state. After additional validation, promote it with:
 
 ```sh
-just --justfile justfile.aje promote-next
+./justa promote-next
 ```
 
 New builds should always go to `codex-aje-next` first. Do not promote it until the staged binary
