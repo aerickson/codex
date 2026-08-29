@@ -21,6 +21,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 use crate::version::CODEX_CLI_VERSION;
+use crate::version::update_check_version;
 
 pub(crate) use crate::updates_cache::dismiss_version;
 
@@ -49,7 +50,7 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     }
 
     info.and_then(|info| {
-        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
+        if is_newer(&info.latest_version, update_check_version()).unwrap_or(false) {
             Some(info.latest_version)
         } else {
             None

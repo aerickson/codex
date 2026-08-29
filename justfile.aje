@@ -12,11 +12,16 @@ help:
 # Build the optimized local CLI binary.
 [unix]
 build:
-    nice -n 10 cargo build -p codex-cli --release
+    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
 
 [windows]
 build:
-    cargo build -p codex-cli --release
+    git fetch --tags --quiet
+    $releaseTag = git describe --tags --match "rust-v[0-9]*" --abbrev=0
+    $releaseVersion = $releaseTag.Substring(6)
+    $sha = git rev-parse --short=12 HEAD
+    $dirty = if (git diff --quiet HEAD --) { "" } else { ".dirty" }
+    $env:CODEX_AJE_VERSION = "$releaseVersion-aje+g$sha$dirty"; $env:CODEX_BUILD_VERSION = "$releaseVersion-aje+g$sha$dirty"; cargo build -p codex-cli --release
 
 # Run the requested tests with the repository's usual local settings.
 [unix]
