@@ -81,7 +81,9 @@ def main() -> int:
 
     for name, binary in deployments.items():
         if not binary.is_file() or not os.access(binary, os.X_OK):
-            print(f"{yellow}{name:<10}{reset}  {binary.name:<18}  {yellow}missing{reset}")
+            print(
+                f"{yellow}{name:<10}{reset}  {binary.name:<18}  {yellow}missing{reset}"
+            )
             continue
 
         version = run(str(binary), "--version")
@@ -97,7 +99,9 @@ def main() -> int:
 
         build_commit = git_commit_for_build(version)
         if build_commit and head_commit:
-            commit_count = run("git", "rev-list", "--count", f"{build_commit}..{head_commit}")
+            commit_count = run(
+                "git", "rev-list", "--count", f"{build_commit}..{head_commit}"
+            )
             print(
                 f"  built commit: {build_commit:<12}  commits since build: {commit_count:<4}"
                 f"  git diff: {build_commit}..HEAD"
