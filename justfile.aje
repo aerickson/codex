@@ -1,9 +1,10 @@
 # AJE-local recipes. Keep this file separate from the repository justfile so
 # rebases of upstream justfile changes cannot overwrite the local workflow.
-set working-directory := "codex-rs"
 set positional-arguments
 
 rust_min_stack := "8388608" # 8 MiB
+rusty_v8_version := "150.4.0"
+rusty_v8_target := `rustc -vV | sed -n 's/^host: //p'`
 
 # Show the recipes in this local justfile.
 help:
@@ -12,7 +13,7 @@ help:
 # Build the optimized local CLI binary.
 [unix]
 build: setup-rusty-v8
-    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
+    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/librusty_v8_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/src_binding_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
 
 [windows]
 build:
@@ -26,23 +27,23 @@ build:
 # Build the companion executable used by the optional Code Mode feature.
 [unix]
 build-code-mode-host: setup-rusty-v8
-    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" nice -n 10 cargo build -p codex-code-mode-host --release
+    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/librusty_v8_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/src_binding_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs" nice -n 10 cargo build -p codex-code-mode-host --release
 
 [windows]
 build-code-mode-host:
     cargo build -p codex-code-mode-host --release
 
-# Cache the matching Codex-published Rusty V8 archive and bindings for macOS.
+# Cache the matching Codex-published Rusty V8 archive and bindings for this host.
 [unix]
 setup-rusty-v8:
-    mkdir -p "$HOME/.cache/codex-aje/rusty-v8-150.4.0"
-    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz"
-    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs"
+    mkdir -p "$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}"
+    test -s "$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/librusty_v8_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz" || curl -fsSL "https://github.com/openai/codex/releases/download/rusty-v8-v{{ rusty_v8_version }}/librusty_v8_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz" -o "$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/librusty_v8_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz"
+    test -s "$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/src_binding_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs" || curl -fsSL "https://github.com/openai/codex/releases/download/rusty-v8-v{{ rusty_v8_version }}/src_binding_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs" -o "$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/src_binding_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs"
 
 # Run the requested tests with the repository's usual local settings.
 [unix]
 test *args: setup-rusty-v8
-    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/librusty_v8_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-{{ rusty_v8_version }}-{{ rusty_v8_target }}/src_binding_{{ rusty_v8_version }}_ptrcomp_sandbox_release_{{ rusty_v8_target }}.rs" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
@@ -70,7 +71,7 @@ deploy-next: build build-code-mode-host
 # Sign a local macOS binary with the first available Developer ID identity.
 [unix]
 sign-binary binary:
-    @identity=$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1); test -n "$identity" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; codesign --force --timestamp --sign "$identity" "{{ binary }}"
+    @case "$(uname -s)" in Darwin) identity=$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1); test -n "$identity" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; codesign --force --timestamp --sign "$identity" "{{ binary }}" ;; esac
 
 # Sign the staged local deployment in place.
 [unix]
