@@ -11,6 +11,7 @@
 //!
 //! - Model information (name, reasoning level)
 //! - Directory paths (current dir, project root)
+//! - Machine hostname
 //! - Git information (branch name)
 //! - Permissions profile
 //! - Approval mode
@@ -74,6 +75,9 @@ pub(crate) enum StatusLineItem {
     )]
     ProjectRoot,
 
+    /// Hostname of the machine running Codex.
+    Hostname,
+
     /// Current git branch name (if in a repository).
     GitBranch,
 
@@ -109,6 +113,20 @@ pub(crate) enum StatusLineItem {
     /// Remaining usage on the secondary rate limit.
     WeeklyLimit,
 
+    /// Countdown until the primary rate limit resets.
+    FiveHourLimitResetIn,
+
+    /// Countdown until the secondary rate limit resets.
+    WeeklyLimitResetIn,
+
+    /// Estimated time until the weekly quota is exhausted at the current usage rate.
+    #[strum(to_string = "weekly-limit-runway", serialize = "wquota-runway")]
+    WeeklyQuotaRunway,
+
+    /// Difference between projected weekly quota exhaustion and the reset time.
+    #[strum(to_string = "weekly-limit-margin", serialize = "weekly-reset-margin")]
+    WeeklyLimitMargin,
+
     /// Codex application version.
     CodexVersion,
 
@@ -123,6 +141,12 @@ pub(crate) enum StatusLineItem {
 
     /// Total output tokens generated.
     TotalOutputTokens,
+
+    /// Estimated credits attributed directly to the current enterprise thread.
+    ThreadCredits,
+
+    /// Estimated dollar cost attributed directly to the current enterprise thread.
+    EstimatedThreadCost,
 
     /// Full thread UUID.
     #[strum(to_string = "thread-id", serialize = "session-id")]
@@ -153,6 +177,7 @@ impl StatusLineItem {
             StatusLineItem::Reasoning => "Current reasoning level",
             StatusLineItem::CurrentDir => "Current working directory",
             StatusLineItem::ProjectRoot => "Project name (omitted when unavailable)",
+            StatusLineItem::Hostname => "Current machine hostname (omitted when unavailable)",
             StatusLineItem::GitBranch => "Current Git branch (omitted when unavailable)",
             StatusLineItem::PullRequestNumber => {
                 "Open pull request number for the current branch (omitted when unavailable)"
@@ -175,6 +200,18 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
+            StatusLineItem::FiveHourLimitResetIn => {
+                "Time until the 5-hour usage limit resets (omitted when unavailable)"
+            }
+            StatusLineItem::WeeklyLimitResetIn => {
+                "Time until the weekly usage limit resets (omitted when unavailable)"
+            }
+            StatusLineItem::WeeklyQuotaRunway => {
+                "Estimated time until the weekly quota is exhausted at the current usage rate"
+            }
+            StatusLineItem::WeeklyLimitMargin => {
+                "Difference between projected weekly quota exhaustion and reset time"
+            }
             StatusLineItem::CodexVersion => "Codex application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
@@ -182,6 +219,12 @@ impl StatusLineItem {
             StatusLineItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             StatusLineItem::TotalInputTokens => "Total input tokens used in session",
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
+            StatusLineItem::ThreadCredits => {
+                "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
+            }
+            StatusLineItem::EstimatedThreadCost => {
+                "Estimated current-thread cost in USD (Enterprise workspaces only; omitted when unavailable)"
+            }
             StatusLineItem::SessionId => "Current thread identifier (omitted until thread starts)",
             StatusLineItem::FastMode => "Whether Fast mode is currently active",
             StatusLineItem::RawOutput => "Whether raw scrollback mode is active",
@@ -204,6 +247,7 @@ impl StatusLineItem {
             StatusLineItem::Reasoning => StatusSurfacePreviewItem::Reasoning,
             StatusLineItem::CurrentDir => StatusSurfacePreviewItem::CurrentDir,
             StatusLineItem::ProjectRoot => StatusSurfacePreviewItem::ProjectRoot,
+            StatusLineItem::Hostname => StatusSurfacePreviewItem::Hostname,
             StatusLineItem::GitBranch => StatusSurfacePreviewItem::GitBranch,
             StatusLineItem::PullRequestNumber => StatusSurfacePreviewItem::PullRequestNumber,
             StatusLineItem::BranchChanges => StatusSurfacePreviewItem::BranchChanges,
@@ -214,11 +258,17 @@ impl StatusLineItem {
             StatusLineItem::ContextUsed => StatusSurfacePreviewItem::ContextUsed,
             StatusLineItem::FiveHourLimit => StatusSurfacePreviewItem::FiveHourLimit,
             StatusLineItem::WeeklyLimit => StatusSurfacePreviewItem::WeeklyLimit,
+            StatusLineItem::FiveHourLimitResetIn => StatusSurfacePreviewItem::FiveHourLimitResetIn,
+            StatusLineItem::WeeklyLimitResetIn => StatusSurfacePreviewItem::WeeklyLimitResetIn,
+            StatusLineItem::WeeklyQuotaRunway => StatusSurfacePreviewItem::WeeklyQuotaRunway,
+            StatusLineItem::WeeklyLimitMargin => StatusSurfacePreviewItem::WeeklyLimitMargin,
             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
             StatusLineItem::ContextWindowSize => StatusSurfacePreviewItem::ContextWindowSize,
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,
             StatusLineItem::TotalInputTokens => StatusSurfacePreviewItem::TotalInputTokens,
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
+            StatusLineItem::ThreadCredits => StatusSurfacePreviewItem::ThreadCredits,
+            StatusLineItem::EstimatedThreadCost => StatusSurfacePreviewItem::EstimatedThreadCost,
             StatusLineItem::SessionId => StatusSurfacePreviewItem::SessionId,
             StatusLineItem::FastMode => StatusSurfacePreviewItem::FastMode,
             StatusLineItem::RawOutput => StatusSurfacePreviewItem::RawOutput,
@@ -352,7 +402,12 @@ impl StatusLineSetupView {
         let default_name = item.to_string();
         let default_description = item.description();
         let (name, description) = match item {
-            StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => (
+            StatusLineItem::FiveHourLimit
+            | StatusLineItem::WeeklyLimit
+            | StatusLineItem::FiveHourLimitResetIn
+            | StatusLineItem::WeeklyLimitResetIn
+            | StatusLineItem::WeeklyQuotaRunway
+            | StatusLineItem::WeeklyLimitMargin => (
                 preview_data.rate_limit_item_name(item.preview_item(), &default_name),
                 preview_data.rate_limit_item_description(item.preview_item(), default_description),
             ),
@@ -371,6 +426,10 @@ impl StatusLineSetupView {
 }
 
 impl BottomPaneView for StatusLineSetupView {
+    fn keymap_contexts(&self) -> crate::keymap::KeymapContextSet {
+        crate::keymap::KeymapContextSet::new(crate::keymap::KeymapContext::List)
+    }
+
     fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
         self.picker.handle_key_event(key_event);
     }
@@ -432,6 +491,19 @@ mod tests {
             "context-remaining"
         );
     }
+
+    #[test]
+    fn thread_usage_items_are_independently_selectable() {
+        assert_eq!(
+            "thread-credits".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::ThreadCredits)
+        );
+        assert_eq!(
+            "estimated-thread-cost".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::EstimatedThreadCost)
+        );
+    }
+
     #[test]
     fn project_name_is_canonical_and_accepts_legacy_ids() {
         assert_eq!(StatusLineItem::ProjectRoot.to_string(), "project-name");
@@ -493,6 +565,34 @@ mod tests {
         assert_eq!(
             "branch-changes".parse::<StatusLineItem>(),
             Ok(StatusLineItem::BranchChanges)
+        );
+    }
+
+    #[test]
+    fn rate_limit_reset_countdown_items_are_selectable_ids() {
+        assert_eq!(
+            "five-hour-limit-reset-in".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::FiveHourLimitResetIn)
+        );
+        assert_eq!(
+            "weekly-limit-reset-in".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitResetIn)
+        );
+        assert_eq!(
+            "weekly-limit-runway".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyQuotaRunway)
+        );
+        assert_eq!(
+            "wquota-runway".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyQuotaRunway)
+        );
+        assert_eq!(
+            "weekly-limit-margin".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitMargin)
+        );
+        assert_eq!(
+            "weekly-reset-margin".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::WeeklyLimitMargin)
         );
     }
 
@@ -667,6 +767,64 @@ mod tests {
         );
 
         assert_snapshot!(render_lines(&view, /*width*/ 72));
+    }
+
+    #[test]
+    fn setup_view_snapshot_includes_thread_usage_items() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let view = StatusLineSetupView::new(
+            Some(&[
+                StatusLineItem::ThreadCredits.to_string(),
+                StatusLineItem::EstimatedThreadCost.to_string(),
+            ]),
+            /*use_theme_colors*/ true,
+            StatusSurfacePreviewData::from_iter([
+                (
+                    StatusLineItem::ThreadCredits.preview_item(),
+                    "5.2 credits".to_string(),
+                ),
+                (
+                    StatusLineItem::EstimatedThreadCost.preview_item(),
+                    "~$1.82".to_string(),
+                ),
+            ]),
+            AppEventSender::new(tx_raw),
+            crate::keymap::RuntimeKeymap::defaults().list,
+        );
+
+        assert_snapshot!(render_lines(&view, /*width*/ 100));
+    }
+
+    #[test]
+    fn setup_view_snapshot_includes_hostname() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let view = StatusLineSetupView::new(
+            Some(&[
+                StatusLineItem::Hostname.to_string(),
+                StatusLineItem::CurrentDir.to_string(),
+            ]),
+            /*use_theme_colors*/ true,
+            StatusSurfacePreviewData::from_iter([
+                (
+                    StatusLineItem::Hostname.preview_item(),
+                    "ssh-build-01.example.com".to_string(),
+                ),
+                (
+                    StatusLineItem::CurrentDir.preview_item(),
+                    "~/codex-rs".to_string(),
+                ),
+            ]),
+            AppEventSender::new(tx_raw),
+            crate::keymap::RuntimeKeymap::defaults().list,
+        );
+
+        assert_snapshot!(
+            render_lines(&view, /*width*/ 100)
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 
     fn render_lines(view: &StatusLineSetupView, width: u16) -> String {

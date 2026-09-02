@@ -1,5 +1,6 @@
 set working-directory := "codex-rs"
 set positional-arguments
+export CODEX_REPO_ROOT := justfile_directory()
 export JUST_SHELL := justfile_directory() / "scripts/just-shell.py"
 set shell := ["python3", "-c", 'import os, runpy; runpy.run_path(os.environ["JUST_SHELL"], run_name="__main__")']
 set windows-shell := ["python", "-c", 'import os, runpy; runpy.run_path(os.environ["JUST_SHELL"], run_name="__main__")']
@@ -15,6 +16,115 @@ help:
 alias c := codex
 codex *args:
     cargo run --bin codex -- {args}
+
+# Build a locally identifiable CLI binary. Pass `--release` for an optimized build.
+[unix]
+build-local *args:
+    cargo build -p codex-cli {args}
+
+[windows]
+build-local *args:
+    cargo build -p codex-cli {args}
+
+# Build the optimized local CLI binary.
+[unix]
+build:
+    nice -n 10 cargo build -p codex-cli --release
+
+[windows]
+build:
+    cargo build -p codex-cli --release
+
+# Copy the release binary into the staged local deployment slot.
+[unix]
+deploy-next:
+    mkdir -p "$HOME/bin"
+    cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    just sign-binary "$HOME/bin/codex-aje-next.tmp"
+    mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+[windows]
+deploy-next:
+    mkdir -p "$HOME/bin"
+    cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
+    mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
+
+# Sign a local macOS binary with the first available Developer ID identity.
+[unix]
+sign-binary binary:
+    @test -n "`security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1`" || { echo 'No Developer ID Application identity found.' >&2; exit 1; }; \
+    codesign --force --timestamp --sign "`security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) \([[:xdigit:]]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1`" "{{ binary }}"
+
+# Sign the staged local deployment in place.
+[unix]
+sign-next:
+    just sign-binary "$HOME/bin/codex-aje-next"
+
+# Promote the staged local binary to the active local deployment.
+promote-next:
+    test -x "$HOME/bin/codex-aje-next"
+    cp "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje.tmp"
+    mv -f "$HOME/bin/codex-aje.tmp" "$HOME/bin/codex-aje"
+
+# Show deployment versions, build commits, and changes since each build.
+deployment-status:
+    @python3 "{{ justfile_directory() }}/scripts/deployment-status.py"
+
+_deployment-status-legacy:
+    @if test -t 1; then \
+        bold=$(printf '\033[1m'); \
+        cyan=$(printf '\033[36m'); \
+        green=$(printf '\033[32m'); \
+        yellow=$(printf '\033[33m'); \
+        reset=$(printf '\033[0m'); \
+    else \
+        bold=; cyan=; green=; yellow=; reset=; \
+    fi; \
+    head_commit=$(git rev-parse --verify HEAD 2>/dev/null || true); \
+    printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$bold" Deployment "$reset" Binary Version Checksum Modified; \
+    printf '%-10s  %-18s  %-32s  %-10s  %s\n' '----------' '------------------' '--------------------------------' '----------' '-------------------'; \
+    for deployment in staged active; do \
+        case "$deployment" in \
+            staged) bin="$HOME/bin/codex-aje-next" ;; \
+            active) bin="$HOME/bin/codex-aje" ;; \
+        esac; \
+        if test -x "$bin"; then \
+            version=$("$bin" --version 2>/dev/null); \
+            checksum=$(cksum "$bin" | awk '{print $1}'); \
+            modified=$(date -r "$bin" '+%Y-%m-%d %H:%M:%S %z'); \
+            printf '%s%-10s%s  %-18s  %-32s  %-10s  %s\n' "$cyan" "$deployment" "$reset" "$(basename "$bin")" "$version" "$checksum" "$modified"; \
+            build_commit=$(printf '%s\n' "$version" | sed -E 's/.*+([[:xdigit:]]{8,40})$/\1/p'); \
+            resolved_build_commit=$(git rev-parse --verify "${build_commit}^{commit}" 2>/dev/null || true); \
+            if test -n "$resolved_build_commit" && test -n "$head_commit"; then \
+                commits_since_build=$(git rev-list --count "$resolved_build_commit..$head_commit"); \
+                printf '  built commit: %-12s  commits since build: %-4s  git diff: %s..HEAD\n' "$build_commit" "$commits_since_build" "$build_commit"; \
+            else \
+                printf '  built commit: %-12s  commits since build: %-4s  git diff: unavailable\n' "${build_commit:-unknown}" '-' ; \
+            fi; \
+            if command -v codesign >/dev/null 2>&1; then \
+                signing_info=$(codesign -dv --verbose=2 "$bin" 2>&1 || true); \
+                identity=$(printf '%s\n' "$signing_info" | sed -n 's/^Authority=//p' | head -n 1); \
+                team_id=$(printf '%s\n' "$signing_info" | sed -n 's/^TeamIdentifier=//p' | head -n 1); \
+                cdhash=$(printf '%s\n' "$signing_info" | sed -n 's/^CDHash=//p' | head -n 1); \
+                if test -n "$identity"; then \
+                    printf '  signing: signed  identity: %s  team: %s  cdhash: %s\n' "$identity" "${team_id:--}" "${cdhash:--}"; \
+                else \
+                    printf '  signing: unsigned\n'; \
+                fi; \
+            else \
+                printf '  signing: unavailable (codesign not found)\n'; \
+            fi; \
+        else \
+            printf '%s%-10s%s  %-18s  %s%-32s%s  %-10s  %s\n' "$yellow" "$deployment" "$reset" "$(basename "$bin")" "$yellow" missing "$reset" '-' '-'; \
+        fi; \
+    done; \
+    if test -x "$HOME/bin/codex-aje-next" && test -x "$HOME/bin/codex-aje"; then \
+        if cmp -s "$HOME/bin/codex-aje-next" "$HOME/bin/codex-aje"; then \
+            printf '%s✓ identical%s  staged and active binaries match\n' "$green" "$reset"; \
+        else \
+            printf '%s✗ different%s  staged and active binaries differ\n' "$yellow" "$reset"; \
+        fi; \
+    fi
 
 # `codex exec`
 exec *args:
@@ -34,6 +144,11 @@ file-search *args:
 # Run the standalone code-mode host from source.
 code-mode-host *args:
     cargo run --bin codex-code-mode-host -- {args}
+
+# Assemble a local Codex package.
+[no-cd]
+assemble-codex-package *args:
+    {{ python }} {{ justfile_directory() }}/scripts/build_codex_package.py {args}
 
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
@@ -196,8 +311,8 @@ argument-comment-lint-from-source *args:
 # Tail logs from the state SQLite database
 [unix]
 log *args:
-    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-state --bin logs_client -- "$@"
+    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-cli --bin logs_client -- "$@"
 
 [windows]
 log *args:
-    $forwarded_args = @($args | Select-Object -Skip 1); if ($forwarded_args.Count -gt 0 -and $forwarded_args[0] -eq "--") { $forwarded_args = @($forwarded_args | Select-Object -Skip 1) }; cargo run -p codex-state --bin logs_client -- @forwarded_args
+    $forwarded_args = @($args | Select-Object -Skip 1); if ($forwarded_args.Count -gt 0 -and $forwarded_args[0] -eq "--") { $forwarded_args = @($forwarded_args | Select-Object -Skip 1) }; cargo run -p codex-cli --bin logs_client -- @forwarded_args
