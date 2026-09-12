@@ -12,7 +12,7 @@ help:
 # Build the optimized local CLI binary.
 [unix]
 build: setup-rusty-v8
-    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 cargo build -p codex-cli --release
+    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git describe --tags --match 'rust-v[0-9]*' --abbrev=0 2>/dev/null || true); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 rustup run 1.95.0 cargo build -p codex-cli --release
 
 [windows]
 build:
@@ -26,7 +26,7 @@ build:
 # Build the companion executable used by the optional Code Mode feature.
 [unix]
 build-code-mode-host: setup-rusty-v8
-    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" nice -n 10 cargo build -p codex-code-mode-host --release
+    RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" nice -n 10 rustup run 1.95.0 cargo build -p codex-code-mode-host --release
 
 [windows]
 build-code-mode-host:
