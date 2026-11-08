@@ -9,6 +9,14 @@ rust_min_stack := "8388608" # 8 MiB
 help:
     just --justfile {{ justfile_directory() }}/justfile.aje --list
 
+# Build a locally identifiable CLI binary. Pass `--release` for an optimized build.
+build-local *args:
+    cargo build -p codex-cli "$@"
+
+# Show deployment versions, build commits, and changes since each build.
+deployment-status:
+    @python3 "{{ justfile_directory() }}/scripts/deployment-status.py"
+
 # Build the optimized local CLI binary.
 # This version lookup is intentionally a little ugly: the AJE branch can have a
 # different ancestry from the release line, so the newest reachable tag may be
