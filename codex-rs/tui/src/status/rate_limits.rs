@@ -7,6 +7,7 @@
 //! capture timestamp so stale detection and reset labels remain coherent for a given draw cycle.
 use crate::chatwidget::fallback_limit_label;
 use crate::chatwidget::limit_label_for_window;
+use crate::clock_format::ClockFormat;
 use crate::text_formatting::capitalize_first;
 
 use super::helpers::format_reset_timestamp;
@@ -71,23 +72,178 @@ pub(crate) struct RateLimitWindowDisplay {
     pub used_percent: f64,
     /// Human-readable local reset time.
     pub resets_at: Option<String>,
+    /// Exact local reset time, retained for countdown displays that are refreshed at render time.
+    pub reset_at: Option<DateTime<Local>>,
     /// Window length in minutes when provided by the server.
     pub window_minutes: Option<i64>,
 }
 
 impl RateLimitWindowDisplay {
-    fn from_window(window: &RateLimitWindow, captured_at: DateTime<Local>) -> Self {
+    fn from_window(
+        window: &RateLimitWindow,
+        captured_at: DateTime<Local>,
+        clock_format: ClockFormat,
+    ) -> Self {
         let resets_at_utc = window
             .resets_at
             .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
             .map(|dt| dt.with_timezone(&Local));
-        let resets_at = resets_at_utc.map(|dt| format_reset_timestamp(dt, captured_at));
+        let resets_at =
+            resets_at_utc.map(|dt| format_reset_timestamp(dt, captured_at, clock_format));
 
         Self {
             used_percent: f64::from(window.used_percent),
             resets_at,
+            reset_at: resets_at_utc,
             window_minutes: window.window_duration_mins,
         }
+    }
+}
+
+/// Formats the remaining time until a rate-limit reset.
+///
+/// Expired and missing timestamps intentionally have no display value: the next rate-limit
+/// response can supply a new reset timestamp without leaving stale data in the status line.
+pub(crate) fn format_reset_countdown(
+    reset_at: Option<DateTime<Local>>,
+    now: DateTime<Local>,
+) -> Option<String> {
+    let remaining_seconds = reset_at?.signed_duration_since(now).num_seconds();
+    if remaining_seconds <= 0 {
+        return None;
+    }
+
+    let remaining_minutes = remaining_seconds / 60;
+    const MINUTES_PER_HOUR: i64 = 60;
+    const MINUTES_PER_DAY: i64 = 24 * MINUTES_PER_HOUR;
+    if remaining_minutes >= MINUTES_PER_DAY {
+        Some(format!(
+            "{}d {}h",
+            remaining_minutes / MINUTES_PER_DAY,
+            (remaining_minutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR
+        ))
+    } else if remaining_minutes >= MINUTES_PER_HOUR {
+        Some(format!(
+            "{}h {}m",
+            remaining_minutes / MINUTES_PER_HOUR,
+            remaining_minutes % MINUTES_PER_HOUR
+        ))
+    } else if remaining_minutes > 0 {
+        Some(format!("{remaining_minutes}m"))
+    } else {
+        Some("<1m".to_string())
+    }
+}
+
+/// Estimates how long a usage window will last if its current consumption rate continues.
+pub(crate) fn format_quota_runway(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> String {
+    let Some(runway_seconds) = quota_runway_seconds(window, now) else {
+        return "weekly runway n/a".to_string();
+    };
+    let runway = format_reset_countdown(Some(now + ChronoDuration::seconds(runway_seconds)), now)
+        .unwrap_or_else(|| "0m".to_string());
+    format!("weekly runway ~{runway}")
+}
+
+/// Formats the signed difference between projected quota exhaustion and the reset time.
+pub(crate) fn format_quota_margin(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> String {
+    let Some(window) = window else {
+        return "weekly margin n/a".to_string();
+    };
+    let Some(reset_at) = window.reset_at else {
+        return "weekly margin n/a".to_string();
+    };
+    let Some(runway_seconds) = quota_runway_seconds(Some(window), now) else {
+        return "weekly margin n/a".to_string();
+    };
+
+    let margin_seconds = runway_seconds - reset_at.signed_duration_since(now).num_seconds();
+    let sign = if margin_seconds < 0 { "-" } else { "+" };
+    let margin = format_reset_countdown(
+        Some(now + ChronoDuration::seconds(margin_seconds.abs())),
+        now,
+    )
+    .unwrap_or_else(|| "0m".to_string());
+    format!("weekly margin {sign}{margin}")
+}
+
+fn quota_runway_seconds(
+    window: Option<&RateLimitWindowDisplay>,
+    now: DateTime<Local>,
+) -> Option<i64> {
+    let window = window?;
+    let window_minutes = window.window_minutes?;
+    let reset_at = window.reset_at?;
+    if !window.used_percent.is_finite() || window.used_percent <= 0.0 {
+        return None;
+    }
+
+    let window_seconds = window_minutes.saturating_mul(60);
+    let seconds_until_reset = reset_at.signed_duration_since(now).num_seconds();
+    let elapsed_seconds = window_seconds.saturating_sub(seconds_until_reset);
+    if elapsed_seconds <= 0 {
+        return None;
+    }
+
+    Some(if window.used_percent >= 100.0 {
+        0
+    } else {
+        ((100.0 - window.used_percent) / window.used_percent * elapsed_seconds as f64) as i64
+    })
+}
+
+/// Merges a percentage-usage value with its adjacent reset countdown, e.g.
+/// `"5h 53% left"` + `"5h reset 1h 42m"` -> `"5h 53% left (reset 1h 42m)"`.
+///
+/// `reset_prefix` strips the countdown's own label (`"5h reset "` or `"weekly reset "`)
+/// so it isn't duplicated inside the merged segment. Centralized here so the live
+/// status line and the setup-popup preview can't drift on this formatting.
+pub(crate) fn merge_reset_countdown(
+    value: &str,
+    reset_value: Option<&str>,
+    reset_prefix: &str,
+) -> String {
+    match reset_value {
+        Some(reset) => format!("{value} (reset {})", reset.trim_start_matches(reset_prefix)),
+        None => value.to_string(),
+    }
+}
+
+/// Merges the weekly usage value, reset countdown, and runway when they are adjacent.
+pub(crate) fn merge_weekly_quota(
+    value: &str,
+    reset_value: Option<&str>,
+    runway_value: Option<&str>,
+    margin_value: Option<&str>,
+) -> String {
+    let value = merge_reset_countdown(value, reset_value, "weekly reset ");
+    let mut details = Vec::new();
+    if let Some(runway) = runway_value {
+        details.push(
+            runway
+                .strip_prefix("weekly runway ")
+                .map_or_else(|| runway.to_string(), |runway| format!("runway {runway}")),
+        );
+    }
+    if let Some(margin) = margin_value {
+        details.push(
+            margin
+                .strip_prefix("weekly margin ")
+                .map_or_else(|| margin.to_string(), |margin| format!("margin {margin}")),
+        );
+    }
+    if details.is_empty() {
+        value
+    } else if reset_value.is_some() {
+        format!("{}; {})", value.trim_end_matches(')'), details.join("; "))
+    } else {
+        format!("{value} ({})", details.join("; "))
     }
 }
 
@@ -95,6 +251,8 @@ impl RateLimitWindowDisplay {
 pub(crate) struct RateLimitSnapshotDisplay {
     /// Canonical limit identifier (for example: `codex` or `codex_other`).
     pub limit_name: String,
+    /// Optional normal model associated with this account-read quota alias.
+    pub normal_model_slug: Option<String>,
     /// Local timestamp representing when this display snapshot was captured.
     pub captured_at: DateTime<Local>,
     /// Primary usage window.
@@ -138,30 +296,36 @@ pub(crate) fn rate_limit_snapshot_display(
     snapshot: &RateLimitSnapshot,
     captured_at: DateTime<Local>,
 ) -> RateLimitSnapshotDisplay {
-    rate_limit_snapshot_display_for_limit(snapshot, "codex".to_string(), captured_at)
+    rate_limit_snapshot_display_for_limit(
+        snapshot,
+        "codex".to_string(),
+        captured_at,
+        ClockFormat::TwentyFourHour,
+    )
 }
 
 pub(crate) fn rate_limit_snapshot_display_for_limit(
     snapshot: &RateLimitSnapshot,
     limit_name: String,
     captured_at: DateTime<Local>,
+    clock_format: ClockFormat,
 ) -> RateLimitSnapshotDisplay {
     RateLimitSnapshotDisplay {
+        normal_model_slug: snapshot.normal_model_slug.clone(),
         limit_name,
         captured_at,
         primary: snapshot
             .primary
             .as_ref()
-            .map(|window| RateLimitWindowDisplay::from_window(window, captured_at)),
+            .map(|window| RateLimitWindowDisplay::from_window(window, captured_at, clock_format)),
         secondary: snapshot
             .secondary
             .as_ref()
-            .map(|window| RateLimitWindowDisplay::from_window(window, captured_at)),
+            .map(|window| RateLimitWindowDisplay::from_window(window, captured_at, clock_format)),
         credits: snapshot.credits.as_ref().map(CreditsSnapshotDisplay::from),
-        individual_limit: snapshot
-            .individual_limit
-            .as_ref()
-            .and_then(|limit| SpendControlLimitSnapshotDisplay::from_limit(limit, captured_at)),
+        individual_limit: snapshot.individual_limit.as_ref().and_then(|limit| {
+            SpendControlLimitSnapshotDisplay::from_limit(limit, captured_at, clock_format)
+        }),
     }
 }
 
@@ -179,14 +343,16 @@ impl SpendControlLimitSnapshotDisplay {
     fn from_limit(
         value: &CoreSpendControlLimitSnapshot,
         captured_at: DateTime<Local>,
+        clock_format: ClockFormat,
     ) -> Option<Self> {
         Some(Self {
             captured_at,
             percent_remaining: f64::from(value.remaining_percent.clamp(0, 100)),
             used: format_credit_amount(&value.used)?,
             limit: format_credit_amount(&value.limit)?,
-            resets_at: DateTime::<Utc>::from_timestamp(value.resets_at, 0)
-                .map(|dt| format_reset_timestamp(dt.with_timezone(&Local), captured_at)),
+            resets_at: DateTime::<Utc>::from_timestamp(value.resets_at, 0).map(|dt| {
+                format_reset_timestamp(dt.with_timezone(&Local), captured_at, clock_format)
+            }),
         })
     }
 }
@@ -216,7 +382,19 @@ pub(crate) fn compose_rate_limit_data_many(
     let mut rows = Vec::with_capacity(snapshots.len().saturating_mul(3));
     let mut stale = false;
 
-    for snapshot in snapshots {
+    // Show ordinary plan usage before model-specific quotas, regardless of backend bucket IDs.
+    let mut ordered_snapshots = snapshots.iter().collect::<Vec<_>>();
+    ordered_snapshots.sort_by_key(|snapshot| !snapshot.limit_name.eq_ignore_ascii_case("codex"));
+    for snapshot in ordered_snapshots {
+        let credit_row = snapshot.credits.as_ref().and_then(credit_status_row);
+        // Metadata-only buckets have no visible values and should not leave an empty heading.
+        if snapshot.primary.is_none()
+            && snapshot.secondary.is_none()
+            && credit_row.is_none()
+            && snapshot.individual_limit.is_none()
+        {
+            continue;
+        }
         stale |= now.signed_duration_since(snapshot.captured_at)
             > ChronoDuration::minutes(RATE_LIMIT_STALE_THRESHOLD_MINUTES);
         stale |= snapshot
@@ -228,7 +406,7 @@ pub(crate) fn compose_rate_limit_data_many(
             })
             .unwrap_or(false);
 
-        let limit_bucket_label = snapshot.limit_name.clone();
+        let limit_bucket_label = crate::model_catalog::model_display_name(&snapshot.limit_name);
         let show_limit_prefix = !limit_bucket_label.eq_ignore_ascii_case("codex");
         let primary_label = snapshot
             .primary
@@ -307,9 +485,7 @@ pub(crate) fn compose_rate_limit_data_many(
             });
         }
 
-        if let Some(credits) = snapshot.credits.as_ref()
-            && let Some(row) = credit_status_row(credits)
-        {
+        if let Some(row) = credit_row {
             rows.push(row);
         }
         if let Some(individual_limit) = snapshot.individual_limit.as_ref() {
@@ -341,10 +517,15 @@ pub(crate) fn compose_rate_limit_data_many(
 /// This function expects a remaining value in the `0..=100` range and clamps out-of-range input.
 /// Passing a used percentage by mistake will invert the bar and mislead users.
 pub(crate) fn render_status_limit_progress_bar(percent_remaining: f64) -> String {
+    render_limit_progress_bar(percent_remaining, STATUS_LIMIT_BAR_SEGMENTS)
+}
+
+/// Shared bar geometry for the status card and compact composer usage indicators.
+pub(crate) fn render_limit_progress_bar(percent_remaining: f64, segments: usize) -> String {
     let ratio = (percent_remaining / 100.0).clamp(0.0, 1.0);
-    let filled = (ratio * STATUS_LIMIT_BAR_SEGMENTS as f64).round() as usize;
-    let filled = filled.min(STATUS_LIMIT_BAR_SEGMENTS);
-    let empty = STATUS_LIMIT_BAR_SEGMENTS.saturating_sub(filled);
+    let filled = (ratio * segments as f64).round() as usize;
+    let filled = filled.min(segments);
+    let empty = segments.saturating_sub(filled);
     format!(
         "[{}{}]",
         STATUS_LIMIT_BAR_FILLED.repeat(filled),
@@ -357,25 +538,30 @@ pub(crate) fn format_status_limit_summary(percent_remaining: f64) -> String {
     format!("{percent_remaining:.0}% left")
 }
 
-/// Builds a single `StatusRateLimitRow` for credits when the snapshot indicates
-/// that the account has credit tracking enabled. When credits are unlimited we
-/// show that fact explicitly; otherwise we render the rounded balance in
-/// credits. Accounts with credits = 0 skip this section entirely.
+/// Builds a single `StatusRateLimitRow` when workspace credits are available.
+/// Unlimited credits are shown explicitly; finite credits show their rounded
+/// balance or `Available` when the balance is hidden.
 fn credit_status_row(credits: &CreditsSnapshotDisplay) -> Option<StatusRateLimitRow> {
-    if !credits.has_credits {
-        return None;
-    }
     if credits.unlimited {
         return Some(StatusRateLimitRow {
             label: "Credits".to_string(),
             value: StatusRateLimitValue::Text("Unlimited".to_string()),
         });
     }
-    let balance = credits.balance.as_ref()?;
-    let display_balance = format_credit_balance(balance)?;
+    if !credits.has_credits {
+        return None;
+    }
+    let value = credits
+        .balance
+        .as_deref()
+        .and_then(format_credit_balance)
+        .map_or_else(
+            || "Available".to_string(),
+            |display_balance| format!("{display_balance} credits"),
+        );
     Some(StatusRateLimitRow {
         label: "Credits".to_string(),
-        value: StatusRateLimitValue::Text(format!("{display_balance} credits")),
+        value: StatusRateLimitValue::Text(value),
     })
 }
 
@@ -392,6 +578,7 @@ fn format_credit_balance(raw: &str) -> Option<String> {
     }
 
     if let Ok(value) = trimmed.parse::<f64>()
+        && value.is_finite()
         && value > 0.0
     {
         let rounded = value.round() as i64;
@@ -416,6 +603,10 @@ mod tests {
     use super::RateLimitWindowDisplay;
     use super::StatusRateLimitData;
     use super::compose_rate_limit_data_many;
+    use super::format_quota_margin;
+    use super::format_quota_runway;
+    use super::format_reset_countdown;
+    use chrono::Duration as ChronoDuration;
     use chrono::Local;
     use pretty_assertions::assert_eq;
 
@@ -423,8 +614,70 @@ mod tests {
         RateLimitWindowDisplay {
             used_percent,
             resets_at: Some("soon".to_string()),
+            reset_at: None,
             window_minutes: Some(300),
         }
+    }
+
+    #[test]
+    fn reset_countdown_is_compact_and_omits_expired_timestamps() {
+        let now = Local::now();
+
+        assert_eq!(
+            format_reset_countdown(Some(now + ChronoDuration::minutes(102)), now),
+            Some("1h 42m".to_string())
+        );
+        assert_eq!(
+            format_reset_countdown(Some(now + ChronoDuration::minutes(80 * 60)), now),
+            Some("3d 8h".to_string())
+        );
+        assert_eq!(
+            format_reset_countdown(Some(now - ChronoDuration::seconds(1)), now),
+            None
+        );
+    }
+
+    #[test]
+    fn quota_runway_projects_from_elapsed_window_and_usage() {
+        let now = Local::now();
+        let window = RateLimitWindowDisplay {
+            used_percent: 50.0,
+            resets_at: Some("soon".to_string()),
+            reset_at: Some(now + ChronoDuration::hours(132)),
+            window_minutes: Some(7 * 24 * 60),
+        };
+
+        assert_eq!(
+            format_quota_runway(Some(&window), now),
+            "weekly runway ~1d 12h"
+        );
+    }
+
+    #[test]
+    fn quota_runway_is_unavailable_without_a_meaningful_rate() {
+        let now = Local::now();
+        let mut window = window(0.0);
+        assert_eq!(format_quota_runway(Some(&window), now), "weekly runway n/a");
+
+        window.used_percent = 50.0;
+        assert_eq!(format_quota_runway(Some(&window), now), "weekly runway n/a");
+        assert_eq!(format_quota_runway(None, now), "weekly runway n/a");
+    }
+
+    #[test]
+    fn quota_margin_compares_runway_with_reset_time() {
+        let now = Local::now();
+        let window = RateLimitWindowDisplay {
+            used_percent: 50.0,
+            resets_at: Some("soon".to_string()),
+            reset_at: Some(now + ChronoDuration::hours(132)),
+            window_minutes: Some(7 * 24 * 60),
+        };
+
+        assert_eq!(
+            format_quota_margin(Some(&window), now),
+            "weekly margin -4d 0h"
+        );
     }
 
     #[test]
@@ -432,6 +685,7 @@ mod tests {
         let now = Local::now();
         let codex = RateLimitSnapshotDisplay {
             limit_name: "codex".to_string(),
+            normal_model_slug: None,
             captured_at: now,
             primary: Some(window(/*used_percent*/ 10.0)),
             secondary: None,
@@ -444,6 +698,7 @@ mod tests {
         };
         let other = RateLimitSnapshotDisplay {
             limit_name: "codex-other".to_string(),
+            normal_model_slug: None,
             captured_at: now,
             primary: Some(window(/*used_percent*/ 20.0)),
             secondary: None,
@@ -478,15 +733,18 @@ mod tests {
         let now = Local::now();
         let other = RateLimitSnapshotDisplay {
             limit_name: "codex-other".to_string(),
+            normal_model_slug: None,
             captured_at: now,
             primary: Some(RateLimitWindowDisplay {
                 used_percent: 20.0,
                 resets_at: Some("soon".to_string()),
+                reset_at: None,
                 window_minutes: Some(60),
             }),
             secondary: Some(RateLimitWindowDisplay {
                 used_percent: 40.0,
                 resets_at: Some("later".to_string()),
+                reset_at: None,
                 window_minutes: Some(2 * 60),
             }),
             credits: None,

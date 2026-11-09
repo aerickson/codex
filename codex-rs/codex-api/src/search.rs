@@ -3,6 +3,7 @@ use codex_protocol::models::ResponseItem;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SearchRequest {
@@ -32,6 +33,9 @@ pub struct SearchCommands {
     /// Query the internet search engine for a given list of queries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_query: Option<Vec<SearchQuery>>,
+    /// Search for scientific papers. Open relevant papers and cite the primary sources you use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub literature_search_query: Option<Vec<SearchQuery>>,
     /// Query the image search engine for a given list of queries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_query: Option<Vec<SearchQuery>>,
@@ -297,4 +301,8 @@ pub enum AllowedCaller {
 pub struct SearchResponse {
     pub encrypted_output: Option<String>,
     pub output: String,
+    /// Structured result DTOs are passed to clients out-of-band from `output`.
+    /// Keep them opaque here so newer result variants remain forward-compatible.
+    #[serde(default)]
+    pub results: Option<Vec<JsonValue>>,
 }

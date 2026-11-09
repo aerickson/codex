@@ -1,10 +1,16 @@
 use crate::AgentPath;
+use crate::ItemIdGenerator;
 use crate::ThreadId;
 use crate::dynamic_tools::DynamicToolCallOutputContentItem;
 use crate::mcp::CallToolResult;
 use crate::memory_citation::MemoryCitation;
+use crate::models::AudioReference;
 use crate::models::ContentItem;
+use crate::models::ContentItemMetadata;
+use crate::models::FunctionCallOutputBody;
 use crate::models::ImageDetail;
+use crate::models::ImageReference;
+use crate::models::InternalChatMessageMetadataPassthrough;
 use crate::models::MessagePhase;
 use crate::models::ResponseItem;
 use crate::models::WebSearchAction;
@@ -19,6 +25,7 @@ use crate::protocol::PatchApplyStatus;
 use crate::protocol::ReviewOutputEvent;
 use crate::protocol::ReviewTarget;
 use crate::protocol::SubAgentActivityKind;
+use crate::protocol::UserMessageAudioKind;
 use crate::user_input::ByteRange;
 use crate::user_input::TextElement;
 use crate::user_input::UserInput;
@@ -30,6 +37,7 @@ use quick_xml::se::to_string as to_xml_string;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -41,6 +49,7 @@ use ts_rs::TS;
 #[ts(tag = "type")]
 pub enum TurnItem {
     UserMessage(UserMessageItem),
+    FunctionCallOutput(FunctionCallOutputItem),
     HookPrompt(HookPromptItem),
     AgentMessage(AgentMessageItem),
     Plan(PlanItem),
@@ -55,11 +64,10 @@ pub enum TurnItem {
     /// schema is owned by the web-search extension.
     WebSearch(WebSearchItem),
     ImageView(ImageViewItem),
-    Sleep(SleepItem),
     /// Item whose schema and lifecycle details are owned by an extension.
     ///
-    /// Standalone image generation and web search use this path. App-server
-    /// wraps the same typed items in their public variants.
+    /// Standalone image generation, sleep, and web search use this path.
+    /// App-server wraps the same typed items in their public variants.
     Extension(ExtensionItem),
     /// Hosted Responses API image-generation item handled directly by core.
     ///
@@ -82,6 +90,16 @@ pub struct UserMessageItem {
     pub content: Vec<UserInput>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
+pub struct FunctionCallOutputItem {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub namespace: Option<String>,
+    pub output: FunctionCallOutputBody,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
 pub struct HookPromptItem {
     pub id: String,
@@ -94,6 +112,11 @@ pub struct HookPromptItem {
 pub struct HookPromptFragment {
     pub text: String,
     pub hook_run_id: String,
+    /// Emission-time attribution; persisted on the ResponseItem, not the UI hook fragment.
+    #[serde(skip)]
+    #[ts(skip)]
+    #[schemars(skip)]
+    pub metadata: ContentItemMetadata,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -112,6 +135,48 @@ pub enum AgentMessageContent {
     Text { text: String },
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum AgentMessageDelivery {
+    Async,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export_to = "v2/")]
+pub struct AsyncUserInputQuestion {
+    pub title: String,
+    pub options: Option<Vec<String>>,
+}
+
+/// A presentation instruction for Chat to apply to this answer when recovering history.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AgentMessageDisplay {
+    /// Unknown actions must be left for the producing client to handle.
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cyber_trusted_access: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub check_trusted_contacts: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+pub struct AgentMessageModeration {
+    pub moderated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub display: Option<AgentMessageDisplay>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 /// Assistant-authored message payload used in turn-item streams.
 ///
@@ -119,6 +184,9 @@ pub enum AgentMessageContent {
 /// should use it when present, but retain legacy completion semantics when it
 /// is `None`.
 pub struct AgentMessageItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub moderation: Option<AgentMessageModeration>,
     pub id: String,
     pub content: Vec<AgentMessageContent>,
     /// Optional phase metadata carried through from `ResponseItem::Message`.
@@ -131,6 +199,12 @@ pub struct AgentMessageItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub memory_citation: Option<MemoryCitation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivery: Option<AgentMessageDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub questions: Option<Vec<AsyncUserInputQuestion>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
@@ -179,9 +253,49 @@ impl From<ExecCommandStatus> for CommandExecutionStatus {
     }
 }
 
+/// Returns whether a path is safe to serialize as a trusted plugin-relative path.
+///
+/// This validates the cross-platform wire shape only. The trusted plugin resolver
+/// remains responsible for establishing that the path actually came from a plugin root.
+pub fn is_safe_plugin_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && path.split('/').all(|component| {
+            !component.is_empty()
+                && !matches!(component, "." | "..")
+                && !matches!(
+                    component.as_bytes(),
+                    [drive, b':', ..] if drive.is_ascii_alphabetic()
+                )
+        })
+}
+
+/// Immutable model labels carried within command lifecycle events for analytics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelInvocationContext {
+    pub model_slug: String,
+    pub reasoning_effort: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
 pub struct CommandExecutionItem {
+    /// Observed process backend for live analytics; None means unknown or not launched.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    pub sandbox_type: Option<crate::sandbox::SandboxType>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    pub model_context: Option<ModelInvocationContext>,
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plugin_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub script_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub process_id: Option<String>,
@@ -195,12 +309,6 @@ pub struct CommandExecutionItem {
     pub status: CommandExecutionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub stdout: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub stderr: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub aggregated_output: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -208,9 +316,6 @@ pub struct CommandExecutionItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "string", optional)]
     pub duration: Option<Duration>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub formatted_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
@@ -252,6 +357,10 @@ pub enum CollabAgentTool {
     ResumeAgent,
     Wait,
     CloseAgent,
+    SendMessage,
+    FollowupTask,
+    InterruptAgent,
+    ListAgents,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
@@ -260,6 +369,7 @@ pub enum CollabAgentToolCallStatus {
     InProgress,
     Completed,
     Failed,
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
@@ -287,6 +397,10 @@ pub struct CollabAgentToolCallItem {
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
 pub struct SubAgentActivityItem {
+    /// Resolved model at sub-agent creation; absent from older records and other activities.
+    pub model: Option<String>,
+    /// Resolved reasoning effort at sub-agent creation, when known.
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
     pub id: String,
     pub kind: SubAgentActivityKind,
     pub agent_thread_id: ThreadId,
@@ -298,6 +412,14 @@ pub struct WebSearchItem {
     pub id: String,
     pub query: String,
     pub action: WebSearchAction,
+    /// Structured search results returned out-of-band by standalone web search.
+    ///
+    /// These stay as opaque JSON at the Codex transport boundary so new result
+    /// fields and result types can pass through without changing model-visible
+    /// context or requiring a Codex release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub results: Option<Vec<JsonValue>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
@@ -308,12 +430,6 @@ pub struct ImageViewItem {
     /// This core protocol type is not exposed directly in the app-server API.
     /// App-server converts the path to `LegacyAppPathString` at its boundary.
     pub path: PathUri,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
-pub struct SleepItem {
-    pub id: String,
-    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
@@ -347,6 +463,25 @@ pub struct FileChangeItem {
     pub stderr: Option<String>,
 }
 
+/// UI resource and display preference for model invocations, captured from the tool descriptor.
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct McpAppUi {
+    pub resource_uri: String,
+    pub preferred_model_display_mode: McpAppDisplayMode,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum McpAppDisplayMode {
+    Inline,
+    Fullscreen,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -358,9 +493,13 @@ pub struct McpToolCallItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub connector_id: Option<String>,
+    /// Legacy compatibility field; prefer `mcp_app_ui.resource_uri` when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub mcp_app_resource_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mcp_app_ui: Option<McpAppUi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub link_id: Option<String>,
@@ -369,13 +508,13 @@ pub struct McpToolCallItem {
     pub app_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub template_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub action_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub plugin_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub read_only_hint: Option<bool>,
     pub status: McpToolCallStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -477,7 +616,10 @@ impl UserMessageItem {
         self.content
             .iter()
             .filter_map(|c| match c {
-                UserInput::Image { image_url, .. } => Some(image_url.clone()),
+                UserInput::Image {
+                    image: ImageReference::Inline { image_url },
+                    ..
+                } => Some(image_url.clone()),
                 _ => None,
             })
             .collect()
@@ -488,7 +630,10 @@ impl UserMessageItem {
             self.content
                 .iter()
                 .filter_map(|c| match c {
-                    UserInput::Image { detail, .. } => Some(*detail),
+                    UserInput::Image {
+                        image: ImageReference::Inline { .. },
+                        detail,
+                    } => Some(*detail),
                     _ => None,
                 })
                 .collect(),
@@ -516,9 +661,74 @@ impl UserMessageItem {
                 .collect(),
         )
     }
+
+    pub fn audio_urls(&self) -> Vec<String> {
+        self.content
+            .iter()
+            .filter_map(|c| match c {
+                UserInput::Audio {
+                    audio: AudioReference::Inline { audio_url },
+                } => Some(audio_url.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns file-backed audio references when the message includes an upload.
+    /// Inline payloads remain exclusively in the legacy `audio` field.
+    pub fn audio_references(&self) -> Option<Vec<AudioReference>> {
+        let audio = self
+            .content
+            .iter()
+            .filter_map(|content| match content {
+                UserInput::Audio {
+                    audio: audio @ AudioReference::File { .. },
+                } => Some(audio.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (!audio.is_empty()).then_some(audio)
+    }
+
+    /// Returns the original inline/file ordering when uploaded audio is present.
+    pub fn audio_order(&self) -> Vec<UserMessageAudioKind> {
+        if !self.content.iter().any(|content| {
+            matches!(
+                content,
+                UserInput::Audio {
+                    audio: AudioReference::File { .. }
+                }
+            )
+        }) {
+            return Vec::new();
+        }
+
+        self.content
+            .iter()
+            .filter_map(|content| match content {
+                UserInput::Audio {
+                    audio: AudioReference::Inline { .. },
+                } => Some(UserMessageAudioKind::Inline),
+                UserInput::Audio {
+                    audio: AudioReference::File { .. },
+                } => Some(UserMessageAudioKind::File),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn local_audio_paths(&self) -> Vec<std::path::PathBuf> {
+        self.content
+            .iter()
+            .filter_map(|c| match c {
+                UserInput::LocalAudio { path } => Some(path.clone()),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
-fn trim_trailing_default_image_details(
+pub(crate) fn trim_trailing_default_image_details(
     mut details: Vec<Option<ImageDetail>>,
 ) -> Vec<Option<ImageDetail>> {
     while matches!(details.last(), Some(None)) {
@@ -528,9 +738,9 @@ fn trim_trailing_default_image_details(
 }
 
 impl HookPromptItem {
-    pub fn from_fragments(id: Option<&String>, fragments: Vec<HookPromptFragment>) -> Self {
+    pub fn from_fragments(id: Option<&str>, fragments: Vec<HookPromptFragment>) -> Self {
         Self {
-            id: id.cloned().unwrap_or_else(new_item_id),
+            id: id.map(str::to_string).unwrap_or_else(new_item_id),
             fragments,
         }
     }
@@ -541,35 +751,47 @@ impl HookPromptFragment {
         Self {
             text: text.into(),
             hook_run_id: hook_run_id.into(),
+            metadata: ContentItemMetadata::default(),
         }
     }
 }
 
-pub fn build_hook_prompt_message(fragments: &[HookPromptFragment]) -> Option<ResponseItem> {
-    let content = fragments
-        .iter()
-        .filter(|fragment| !fragment.hook_run_id.trim().is_empty())
-        .filter_map(|fragment| {
-            serialize_hook_prompt_fragment(&fragment.text, &fragment.hook_run_id)
-                .map(|text| ContentItem::InputText { text })
-        })
-        .collect::<Vec<_>>();
+pub fn build_hook_prompt_message(
+    fragments: &[HookPromptFragment],
+    item_id_generator: &ItemIdGenerator,
+) -> Option<ResponseItem> {
+    let mut content = Vec::new();
+    let mut metadata = Vec::new();
+    for fragment in fragments {
+        if let Some(text) = serialize_hook_prompt_fragment(&fragment.text, &fragment.hook_run_id) {
+            content.push(ContentItem::InputText { text });
+            metadata.push(fragment.metadata.clone());
+        }
+    }
 
     if content.is_empty() {
         return None;
     }
 
     Some(ResponseItem::Message {
-        id: Some(new_item_id()),
+        status: None,
+        encrypted_content: None,
+        id: Some(item_id_generator("msg")),
         role: "user".to_string(),
         content,
         phase: None,
-        internal_chat_message_metadata_passthrough: None,
+        internal_chat_message_metadata_passthrough: metadata
+            .iter()
+            .any(|part| part != &ContentItemMetadata::default())
+            .then_some(InternalChatMessageMetadataPassthrough {
+                content_item_metadata: Some(metadata),
+                ..Default::default()
+            }),
     })
 }
 
 pub fn parse_hook_prompt_message(
-    id: Option<&String>,
+    id: Option<&str>,
     content: &[ContentItem],
 ) -> Option<HookPromptItem> {
     let fragments = content
@@ -596,7 +818,7 @@ pub fn parse_hook_prompt_fragment(text: &str) -> Option<HookPromptFragment> {
         return None;
     }
 
-    Some(HookPromptFragment { text, hook_run_id })
+    Some(HookPromptFragment::from_single_hook(text, hook_run_id))
 }
 
 fn serialize_hook_prompt_fragment(text: &str, hook_run_id: &str) -> Option<String> {
@@ -610,21 +832,11 @@ fn serialize_hook_prompt_fragment(text: &str, hook_run_id: &str) -> Option<Strin
     .ok()
 }
 
-impl AgentMessageItem {
-    pub fn new(content: &[AgentMessageContent]) -> Self {
-        Self {
-            id: new_item_id(),
-            content: content.to_vec(),
-            phase: None,
-            memory_citation: None,
-        }
-    }
-}
-
 impl TurnItem {
     pub fn id(&self) -> String {
         match self {
             TurnItem::UserMessage(item) => item.id.clone(),
+            TurnItem::FunctionCallOutput(item) => item.id.clone(),
             TurnItem::HookPrompt(item) => item.id.clone(),
             TurnItem::AgentMessage(item) => item.id.clone(),
             TurnItem::Plan(item) => item.id.clone(),
@@ -635,7 +847,6 @@ impl TurnItem {
             TurnItem::SubAgentActivity(item) => item.id.clone(),
             TurnItem::WebSearch(item) => item.id.clone(),
             TurnItem::ImageView(item) => item.id.clone(),
-            TurnItem::Sleep(item) => item.id.clone(),
             TurnItem::Extension(item) => item.id().to_string(),
             TurnItem::ImageGeneration(item) => item.id.clone(),
             TurnItem::EnteredReviewMode(item) => item.id.clone(),
@@ -650,7 +861,90 @@ impl TurnItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_extension_items::sleep::SleepItem;
     use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    #[test]
+    fn sleep_extension_item_preserves_type_and_kind() {
+        let item = TurnItem::Extension(ExtensionItem::Sleep(SleepItem {
+            id: "sleep-1".to_string(),
+            duration_ms: 1_000,
+        }));
+
+        assert_eq!(
+            serde_json::to_value(item).expect("serialize sleep extension item"),
+            json!({
+                "type": "Extension",
+                "kind": "clock.sleep",
+                "id": "sleep-1",
+                "durationMs": 1_000,
+            })
+        );
+    }
+
+    #[test]
+    fn user_message_item_extracts_audio_attachments() {
+        let item = UserMessageItem::new(&[
+            UserInput::Text {
+                text: "transcribe these".to_string(),
+                text_elements: Vec::new(),
+            },
+            UserInput::Audio {
+                audio: AudioReference::Inline {
+                    audio_url: "https://example.com/remote.mp3".to_string(),
+                },
+            },
+            UserInput::Audio {
+                audio: AudioReference::File {
+                    file_id: "file_audio".to_string(),
+                },
+            },
+            UserInput::LocalAudio {
+                path: std::path::PathBuf::from("local.wav"),
+            },
+        ]);
+
+        assert_eq!(
+            (item.audio_urls(), item.local_audio_paths()),
+            (
+                vec!["https://example.com/remote.mp3".to_string()],
+                vec![std::path::PathBuf::from("local.wav")],
+            )
+        );
+        assert_eq!(
+            item.audio_references(),
+            Some(vec![AudioReference::File {
+                file_id: "file_audio".to_string(),
+            }])
+        );
+        assert_eq!(
+            item.audio_order(),
+            vec![UserMessageAudioKind::Inline, UserMessageAudioKind::File]
+        );
+    }
+
+    #[test]
+    fn plugin_relative_paths_use_safe_wire_shape() {
+        assert!(is_safe_plugin_relative_path("scripts/run.py"));
+
+        for path in [
+            "",
+            "/home/user/.codex/plugins/cache/sample/scripts/run.py",
+            "C:/Users/user/.codex/plugins/cache/sample/scripts/run.py",
+            "scripts/C:/run.py",
+            r"\\server\share\sample\scripts\run.py",
+            r"scripts\run.py",
+            "scripts//run.py",
+            "scripts/./run.py",
+            "scripts/../run.py",
+        ] {
+            assert!(
+                !is_safe_plugin_relative_path(path),
+                "unsafe plugin-relative path should be rejected: {path:?}"
+            );
+        }
+    }
 
     #[test]
     fn hook_prompt_roundtrips_multiple_fragments() {
@@ -658,11 +952,14 @@ mod tests {
             HookPromptFragment::from_single_hook("Retry with care & joy.", "hook-run-1"),
             HookPromptFragment::from_single_hook("Then summarize cleanly.", "hook-run-2"),
         ];
-        let message = build_hook_prompt_message(&original).expect("hook prompt");
+        let message =
+            build_hook_prompt_message(&original, &crate::uuid_v7_item_id_generator_for_test())
+                .expect("hook prompt");
 
-        let ResponseItem::Message { content, .. } = message else {
+        let ResponseItem::Message { id, content, .. } = message else {
             panic!("expected hook prompt message");
         };
+        assert!(id.is_some_and(|id| id.starts_with("msg_")));
 
         let parsed = parse_hook_prompt_message(/*id*/ None, &content).expect("parsed hook prompt");
         assert_eq!(parsed.fragments, original);
@@ -680,6 +977,7 @@ mod tests {
             HookPromptFragment {
                 text: "Retry with tests.".to_string(),
                 hook_run_id: "hook-run-1".to_string(),
+                metadata: Default::default(),
             }
         );
     }

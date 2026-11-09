@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
-use ratatui::text::Line;
+use super::footer_content::FooterContent;
+use codex_protocol::ThreadId;
 
 use super::status_line_from_segments;
 use super::status_line_setup::StatusLineItem;
+use crate::status::merge_reset_countdown;
+use crate::status::merge_weekly_quota;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum StatusSurfacePreviewItem {
@@ -11,7 +14,9 @@ pub(crate) enum StatusSurfacePreviewItem {
     ProjectName,
     ProjectRoot,
     CurrentDir,
+    Hostname,
     Status,
+    ThreadName,
     ThreadTitle,
     GitBranch,
     PullRequestNumber,
@@ -22,18 +27,27 @@ pub(crate) enum StatusSurfacePreviewItem {
     ContextUsed,
     FiveHourLimit,
     WeeklyLimit,
+    FiveHourLimitResetIn,
+    WeeklyLimitResetIn,
+    WeeklyQuotaRunway,
+    WeeklyLimitMargin,
     CodexVersion,
     ContextWindowSize,
     UsedTokens,
     TotalInputTokens,
     TotalOutputTokens,
+    ThreadCredits,
+    EstimatedThreadCost,
     SessionId,
     FastMode,
+    Daybreak,
     RawOutput,
     WorkspaceHeadline,
     Model,
     ModelWithReasoning,
     Reasoning,
+    Profile,
+    Provider,
     TaskProgress,
 }
 
@@ -44,7 +58,9 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ProjectName => "my-project",
             StatusSurfacePreviewItem::ProjectRoot => "my-project",
             StatusSurfacePreviewItem::CurrentDir => "~/my-project/subdir",
+            StatusSurfacePreviewItem::Hostname => "my-host",
             StatusSurfacePreviewItem::Status => "Working",
+            StatusSurfacePreviewItem::ThreadName => "thread name",
             StatusSurfacePreviewItem::ThreadTitle => "thread title",
             StatusSurfacePreviewItem::GitBranch => "feat/awesome-feature",
             StatusSurfacePreviewItem::PullRequestNumber => "PR #123",
@@ -55,18 +71,27 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ContextUsed => "Context 0% used",
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
+            StatusSurfacePreviewItem::FiveHourLimitResetIn => "5h reset 1h 42m",
+            StatusSurfacePreviewItem::WeeklyLimitResetIn => "weekly reset 3d 8h",
+            StatusSurfacePreviewItem::WeeklyQuotaRunway => "weekly runway ~18h",
+            StatusSurfacePreviewItem::WeeklyLimitMargin => "weekly margin -21h",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
             StatusSurfacePreviewItem::ContextWindowSize => "0 window",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
             StatusSurfacePreviewItem::TotalInputTokens => "0 in",
             StatusSurfacePreviewItem::TotalOutputTokens => "0 out",
+            StatusSurfacePreviewItem::ThreadCredits => "5.2 credits",
+            StatusSurfacePreviewItem::EstimatedThreadCost => "~$1.82",
             StatusSurfacePreviewItem::SessionId => "550e8400-e29b-41d4",
-            StatusSurfacePreviewItem::FastMode => "Fast on",
+            StatusSurfacePreviewItem::FastMode => "Fast",
+            StatusSurfacePreviewItem::Daybreak => "Daybreak off",
             StatusSurfacePreviewItem::RawOutput => "raw output",
             StatusSurfacePreviewItem::WorkspaceHeadline => "Workspace headline",
             StatusSurfacePreviewItem::Model => "gpt-5.2-codex",
             StatusSurfacePreviewItem::ModelWithReasoning => "gpt-5.2-codex medium",
             StatusSurfacePreviewItem::Reasoning => "medium",
+            StatusSurfacePreviewItem::Profile => "profile: <name>",
+            StatusSurfacePreviewItem::Provider => "provider: <id>",
             StatusSurfacePreviewItem::TaskProgress => "Tasks 0/0",
         }
     }
@@ -77,7 +102,9 @@ impl StatusSurfacePreviewItem {
             Self::ProjectName,
             Self::ProjectRoot,
             Self::CurrentDir,
+            Self::Hostname,
             Self::Status,
+            Self::ThreadName,
             Self::ThreadTitle,
             Self::GitBranch,
             Self::PullRequestNumber,
@@ -88,18 +115,27 @@ impl StatusSurfacePreviewItem {
             Self::ContextUsed,
             Self::FiveHourLimit,
             Self::WeeklyLimit,
+            Self::FiveHourLimitResetIn,
+            Self::WeeklyLimitResetIn,
+            Self::WeeklyQuotaRunway,
+            Self::WeeklyLimitMargin,
             Self::CodexVersion,
             Self::ContextWindowSize,
             Self::UsedTokens,
             Self::TotalInputTokens,
             Self::TotalOutputTokens,
+            Self::ThreadCredits,
+            Self::EstimatedThreadCost,
             Self::SessionId,
             Self::FastMode,
+            Self::Daybreak,
             Self::RawOutput,
             Self::WorkspaceHeadline,
             Self::Model,
             Self::ModelWithReasoning,
             Self::Reasoning,
+            Self::Profile,
+            Self::Provider,
             Self::TaskProgress,
         ]
         .into_iter()
@@ -114,12 +150,16 @@ struct PreviewValue {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StatusSurfacePreviewData {
+    pub(crate) thread_id: Option<ThreadId>,
+    pub(crate) pull_request_url: Option<String>,
     values: BTreeMap<StatusSurfacePreviewItem, PreviewValue>,
 }
 
 impl Default for StatusSurfacePreviewData {
     fn default() -> Self {
         let mut data = Self {
+            thread_id: None,
+            pull_request_url: None,
             values: BTreeMap::new(),
         };
         for item in StatusSurfacePreviewItem::iter() {
@@ -222,15 +262,69 @@ impl StatusSurfacePreviewData {
         &self,
         items: I,
         use_theme_colors: bool,
-    ) -> Option<Line<'static>>
+    ) -> Option<FooterContent>
     where
         I: IntoIterator<Item = StatusLineItem>,
     {
-        let segments = items.into_iter().filter_map(|item| {
-            self.value_for(item.preview_item())
-                .map(|value| (item, value.to_string()))
+        let items: Vec<_> = items.into_iter().collect();
+        let segments = items.iter().enumerate().filter_map(|(index, item)| {
+            let value = self.value_for(item.preview_item())?;
+            let value = match item {
+                StatusLineItem::FiveHourLimit
+                    if items.get(index + 1) == Some(&StatusLineItem::FiveHourLimitResetIn) =>
+                {
+                    let reset = self.live_value_for(StatusSurfacePreviewItem::FiveHourLimitResetIn);
+                    merge_reset_countdown(value, reset, "5h reset ")
+                }
+                StatusLineItem::WeeklyLimit
+                    if items.get(index + 1) == Some(&StatusLineItem::WeeklyLimitResetIn) =>
+                {
+                    let reset = self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitResetIn);
+                    let runway = (items.get(index + 2) == Some(&StatusLineItem::WeeklyQuotaRunway))
+                        .then(|| self.live_value_for(StatusSurfacePreviewItem::WeeklyQuotaRunway))
+                        .flatten();
+                    let margin = (items.get(index + 3) == Some(&StatusLineItem::WeeklyLimitMargin))
+                        .then(|| self.live_value_for(StatusSurfacePreviewItem::WeeklyLimitMargin))
+                        .flatten();
+                    merge_weekly_quota(value, reset, runway, margin)
+                }
+                StatusLineItem::FiveHourLimitResetIn
+                    if index > 0 && items[index - 1] == StatusLineItem::FiveHourLimit =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyQuotaRunway
+                    if index >= 2
+                        && items[index - 2] == StatusLineItem::WeeklyLimit
+                        && items[index - 1] == StatusLineItem::WeeklyLimitResetIn =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyLimitMargin
+                    if index >= 3
+                        && items[index - 3] == StatusLineItem::WeeklyLimit
+                        && items[index - 2] == StatusLineItem::WeeklyLimitResetIn
+                        && items[index - 1] == StatusLineItem::WeeklyQuotaRunway =>
+                {
+                    return None;
+                }
+                StatusLineItem::WeeklyLimitResetIn
+                    if index > 0 && items[index - 1] == StatusLineItem::WeeklyLimit =>
+                {
+                    return None;
+                }
+                _ => value.to_string(),
+            };
+            Some((*item, value))
         });
-        status_line_from_segments(segments, use_theme_colors)
+        status_line_from_segments(
+            segments,
+            use_theme_colors,
+            self.thread_id,
+            self.live_value_for(StatusSurfacePreviewItem::PullRequestNumber)
+                .and(self.pull_request_url.as_deref()),
+        )
+        .map(FooterContent::HyperlinkLine)
     }
 }
 
@@ -250,6 +344,26 @@ fn rate_limit_preview_copy(value: &str) -> Option<RateLimitPreviewCopy> {
         Some(RateLimitPreviewCopy {
             name: "usage-limit",
             description: "Remaining usage on the primary usage limit (omitted when unavailable)",
+        })
+    } else if value.starts_with("5h reset ") {
+        Some(RateLimitPreviewCopy {
+            name: "five-hour-limit-reset-in",
+            description: "Time until the 5-hour usage limit resets (omitted when unavailable)",
+        })
+    } else if value.starts_with("weekly reset ") {
+        Some(RateLimitPreviewCopy {
+            name: "weekly-limit-reset-in",
+            description: "Time until the weekly usage limit resets (omitted when unavailable)",
+        })
+    } else if value.starts_with("weekly runway ") {
+        Some(RateLimitPreviewCopy {
+            name: "weekly-limit-runway",
+            description: "Estimated time until the weekly quota is exhausted at the current usage rate",
+        })
+    } else if value.starts_with("weekly margin ") {
+        Some(RateLimitPreviewCopy {
+            name: "weekly-limit-margin",
+            description: "Difference between projected weekly quota exhaustion and reset time",
         })
     } else if value.starts_with("5h ") {
         Some(RateLimitPreviewCopy {

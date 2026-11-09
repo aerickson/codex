@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -11,11 +12,14 @@ use serde::Serialize;
 pub mod accessible;
 mod app_info;
 mod app_tool_policy;
+mod connector_runtime;
 mod directory_cache;
 pub mod filter;
 pub mod merge;
 pub mod metadata;
+mod metadata_store;
 mod plugin_config;
+mod runtime_projection;
 mod snapshot;
 
 pub use app_info::AppBranding;
@@ -28,13 +32,32 @@ pub use app_tool_policy::AppToolPolicyEvaluator;
 pub use app_tool_policy::AppToolPolicyInput;
 pub use app_tool_policy::app_is_enabled;
 pub use app_tool_policy::apps_config_from_layer_stack;
+pub use app_tool_policy::apps_config_origins_from_layer_stack;
+pub use connector_runtime::ConnectorRuntimeContext;
+pub use connector_runtime::ConnectorRuntimeContextKey;
+pub use connector_runtime::ConnectorRuntimeFetchSource;
+pub use connector_runtime::ConnectorRuntimeFetchTicket;
+pub use connector_runtime::ConnectorRuntimeManager;
+pub use connector_runtime::ConnectorRuntimePayload;
+pub use connector_runtime::ConnectorRuntimeSnapshot;
+pub use connector_runtime::connector_runtime_cache_path;
+pub use connector_runtime::connector_runtime_context_key;
 pub use directory_cache::ConnectorDirectoryCacheContext;
+pub use metadata_store::ConnectorMetadata;
+pub use metadata_store::ConnectorMetadataStore;
+pub use metadata_store::ConnectorToolSummary;
 pub use plugin_config::parse_plugin_app_config;
 pub use plugin_config::parse_plugin_app_config_value;
+pub use runtime_projection::ConnectorRuntimeTool;
+pub use runtime_projection::InstalledConnectorRuntime;
+pub use runtime_projection::connector_tool_is_synthetic;
+pub use runtime_projection::installed_connector_runtime;
 pub use snapshot::ConnectorSnapshot;
 pub use snapshot::PluginConnectorSource;
 
 pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);
+/// TTL for app/read metadata; it starts aligned with the connector directory cache.
+pub const CONNECTOR_METADATA_CACHE_TTL: Duration = CONNECTORS_CACHE_TTL;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectorDirectoryCacheKey {
@@ -64,7 +87,7 @@ impl ConnectorDirectoryCacheKey {
 struct CachedConnectorDirectory {
     key: ConnectorDirectoryCacheKey,
     expires_at: Instant,
-    connectors: Vec<AppInfo>,
+    connectors: Arc<[AppInfo]>,
 }
 
 static CONNECTOR_DIRECTORY_CACHE: LazyLock<StdMutex<Option<CachedConnectorDirectory>>> =
@@ -101,7 +124,7 @@ pub struct DirectoryApp {
 
 pub fn cached_directory_connectors(
     cache_context: &ConnectorDirectoryCacheContext,
-) -> Option<Vec<AppInfo>> {
+) -> Option<Arc<[AppInfo]>> {
     if let Some(cached_connectors) = cached_directory_connectors_in_memory(&cache_context.cache_key)
     {
         return Some(cached_connectors);
@@ -112,9 +135,10 @@ pub fn cached_directory_connectors(
     else {
         return None;
     };
+    let connectors = Arc::from(connectors);
     write_cached_directory_connectors_in_memory(
         cache_context.cache_key.clone(),
-        &connectors,
+        Arc::clone(&connectors),
         Duration::ZERO,
     );
     Some(connectors)
@@ -122,25 +146,25 @@ pub fn cached_directory_connectors(
 
 fn cached_directory_connectors_in_memory(
     cache_key: &ConnectorDirectoryCacheKey,
-) -> Option<Vec<AppInfo>> {
+) -> Option<Arc<[AppInfo]>> {
     let cache_guard = CONNECTOR_DIRECTORY_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache_guard
         .as_ref()
         .filter(|cached| cached.key == *cache_key)
-        .map(|cached| cached.connectors.clone())
+        .map(|cached| Arc::clone(&cached.connectors))
 }
 
 fn unexpired_directory_connectors_in_memory(
     cache_key: &ConnectorDirectoryCacheKey,
-) -> Option<Vec<AppInfo>> {
+) -> Option<Arc<[AppInfo]>> {
     let cache_guard = CONNECTOR_DIRECTORY_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let cached = cache_guard.as_ref()?;
     if cached.key == *cache_key && Instant::now() < cached.expires_at {
-        return Some(cached.connectors.clone());
+        return Some(Arc::clone(&cached.connectors));
     }
     None
 }
@@ -159,13 +183,31 @@ where
         && let Some(cached_connectors) =
             unexpired_directory_connectors_in_memory(&cache_context.cache_key)
     {
-        return Ok(cached_connectors);
+        return Ok(cached_connectors.to_vec());
     }
 
-    let mut apps = list_directory_connectors(&mut fetch_page).await?;
-    if is_workspace_account {
-        apps.extend(list_workspace_connectors(&mut fetch_page).await?);
-    }
+    let apps = if is_workspace_account {
+        // The workspace directory is independent from the paginated public directory.
+        // Start both before awaiting either so workspace accounts do not pay for the
+        // two request chains back-to-back.
+        let workspace_connectors =
+            fetch_page("/connectors/directory/list_workspace?external_logos=true".to_string());
+        let directory_connectors = list_directory_connectors(&mut fetch_page);
+        let (directory_connectors, workspace_connectors) =
+            tokio::join!(directory_connectors, workspace_connectors);
+        let mut apps = directory_connectors?;
+        if let Ok(response) = workspace_connectors {
+            apps.extend(
+                response
+                    .apps
+                    .into_iter()
+                    .filter(|app| !is_hidden_directory_app(app)),
+            );
+        }
+        apps
+    } else {
+        list_directory_connectors(&mut fetch_page).await?
+    };
 
     let mut connectors = merge_directory_apps(apps)
         .into_iter()
@@ -196,7 +238,7 @@ fn write_cached_directory_connectors(
 ) {
     write_cached_directory_connectors_in_memory(
         cache_context.cache_key.clone(),
-        connectors,
+        Arc::from(connectors),
         CONNECTORS_CACHE_TTL,
     );
     directory_cache::write_cached_directory_connectors_to_disk(cache_context, connectors);
@@ -204,7 +246,7 @@ fn write_cached_directory_connectors(
 
 fn write_cached_directory_connectors_in_memory(
     cache_key: ConnectorDirectoryCacheKey,
-    connectors: &[AppInfo],
+    connectors: Arc<[AppInfo]>,
     ttl: Duration,
 ) {
     let mut cache_guard = CONNECTOR_DIRECTORY_CACHE
@@ -213,7 +255,7 @@ fn write_cached_directory_connectors_in_memory(
     *cache_guard = Some(CachedConnectorDirectory {
         key: cache_key,
         expires_at: Instant::now() + ttl,
-        connectors: connectors.to_vec(),
+        connectors,
     });
 }
 
@@ -248,23 +290,6 @@ where
         }
     }
     Ok(apps)
-}
-
-async fn list_workspace_connectors<F, Fut>(fetch_page: &mut F) -> anyhow::Result<Vec<DirectoryApp>>
-where
-    F: FnMut(String) -> Fut,
-    Fut: Future<Output = anyhow::Result<DirectoryListResponse>>,
-{
-    let response =
-        fetch_page("/connectors/directory/list_workspace?external_logos=true".to_string()).await;
-    match response {
-        Ok(response) => Ok(response
-            .apps
-            .into_iter()
-            .filter(|app| !is_hidden_directory_app(app))
-            .collect()),
-        Err(_) => Ok(Vec::new()),
-    }
 }
 
 fn merge_directory_apps(apps: Vec<DirectoryApp>) -> Vec<DirectoryApp> {
@@ -407,11 +432,6 @@ fn merge_directory_app(existing: &mut DirectoryApp, incoming: DirectoryApp) {
             {
                 existing_app_metadata.version_notes = incoming_app_metadata.version_notes;
             }
-            if existing_app_metadata.first_party_type.is_none()
-                && incoming_app_metadata.first_party_type.is_some()
-            {
-                existing_app_metadata.first_party_type = incoming_app_metadata.first_party_type;
-            }
             if existing_app_metadata.first_party_requires_install.is_none()
                 && incoming_app_metadata.first_party_requires_install.is_some()
             {
@@ -463,8 +483,13 @@ fn directory_app_to_app_info(app: DirectoryApp) -> AppInfo {
 }
 
 fn connector_install_url(name: &str, connector_id: &str) -> String {
+    let chatgpt_base_url = std::env::var("CODEX_APP_SERVER_CHATGPT_BASE_URL")
+        .unwrap_or_else(|_| "https://chatgpt.com".to_string());
+    let chatgpt_origin = chatgpt_base_url
+        .trim_end_matches('/')
+        .trim_end_matches("/backend-api");
     let slug = connector_name_slug(name);
-    format!("https://chatgpt.com/apps/{slug}/{connector_id}")
+    format!("{chatgpt_origin}/apps/{slug}/{connector_id}")
 }
 
 fn connector_name_slug(name: &str) -> String {
@@ -504,11 +529,12 @@ fn normalize_connector_value(value: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::time::Duration;
     use tempfile::TempDir;
+    use tokio::sync::Notify;
 
     static CONNECTOR_DIRECTORY_CACHE_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
         LazyLock::new(|| tokio::sync::Mutex::new(()));
@@ -548,6 +574,19 @@ mod tests {
             distribution_channel: None,
             visibility: None,
         }
+    }
+
+    #[test]
+    fn connector_install_url_uses_configured_origin() {
+        let chatgpt_base_url = std::env::var("CODEX_APP_SERVER_CHATGPT_BASE_URL")
+            .unwrap_or_else(|_| "https://chatgpt.com".to_string());
+        let chatgpt_origin = chatgpt_base_url
+            .trim_end_matches('/')
+            .trim_end_matches("/backend-api");
+        assert_eq!(
+            connector_install_url("Google Calendar", "calendar"),
+            format!("{chatgpt_origin}/apps/google-calendar/calendar"),
+        );
     }
 
     #[test]
@@ -728,6 +767,60 @@ mod tests {
         clippy::await_holding_invalid_type,
         reason = "test serializes access to the shared connector cache for its full duration"
     )]
+    async fn list_all_connectors_overlaps_workspace_and_directory_requests() -> anyhow::Result<()> {
+        let _cache_guard = CONNECTOR_DIRECTORY_CACHE_TEST_LOCK.lock().await;
+
+        let codex_home = TempDir::new()?;
+        let cache_context = cache_context(&codex_home, "overlap");
+        let workspace_started = Arc::new(Notify::new());
+
+        // The public directory response waits until the workspace request is polled.
+        // Without overlap this future cannot complete; the timeout only bounds a
+        // regression instead of supplying the ordering.
+        let connectors = tokio::time::timeout(
+            Duration::from_secs(1),
+            list_all_connectors_with_options(
+                cache_context,
+                /*is_workspace_account*/ true,
+                /*force_refetch*/ true,
+                move |path| {
+                    let workspace_started = Arc::clone(&workspace_started);
+                    async move {
+                        if path.starts_with("/connectors/directory/list_workspace") {
+                            workspace_started.notify_one();
+                            Ok(DirectoryListResponse {
+                                apps: vec![app("workspace", "Workspace")],
+                                next_token: None,
+                            })
+                        } else {
+                            workspace_started.notified().await;
+                            Ok(DirectoryListResponse {
+                                apps: vec![app("directory", "Directory")],
+                                next_token: None,
+                            })
+                        }
+                    }
+                },
+            ),
+        )
+        .await
+        .expect("workspace request should start while directory request is pending")?;
+
+        assert_eq!(
+            connectors
+                .into_iter()
+                .map(|connector| connector.id)
+                .collect::<Vec<_>>(),
+            vec!["directory".to_string(), "workspace".to_string()]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "test serializes access to the shared connector cache for its full duration"
+    )]
     async fn cached_directory_connectors_reads_directory_disk_cache() -> anyhow::Result<()> {
         let _cache_guard = CONNECTOR_DIRECTORY_CACHE_TEST_LOCK.lock().await;
 
@@ -758,7 +851,9 @@ mod tests {
         let second = cached_directory_connectors(&cache_context).expect("disk cache should load");
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(first, second);
+        assert_eq!(first.as_slice(), second.as_ref());
+        let cached = cached_directory_connectors(&cache_context).expect("memory cache should hit");
+        assert!(Arc::ptr_eq(&second, &cached));
         Ok(())
     }
 
@@ -800,8 +895,8 @@ mod tests {
             &cached_expected.id,
         ));
         assert_eq!(
-            cached_directory_connectors(&cache_context),
-            Some(vec![cached_expected])
+            cached_directory_connectors(&cache_context).as_deref(),
+            Some([cached_expected].as_slice())
         );
         let refreshed_calls = Arc::clone(&calls);
 

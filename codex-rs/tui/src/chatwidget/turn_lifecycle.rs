@@ -11,7 +11,11 @@ pub(super) struct TurnLifecycleState {
     /// Tracks whether codex-core currently considers an agent turn to be in progress.
     pub(super) agent_turn_running: bool,
     pub(super) last_turn_id: Option<String>,
+    /// Cloud confirmed admission to a turn whose live start we have yet to process.
+    pub(super) admitted_turn_id: Option<String>,
     pub(super) budget_limited_turn_ids: HashSet<String>,
+    /// Completion labels already inserted into this thread's visible history.
+    pub(super) rendered_completion_turn_ids: HashSet<String>,
     pub(super) goal_status_active_turn_started_at: Option<Instant>,
 }
 
@@ -21,7 +25,9 @@ impl TurnLifecycleState {
             sleep_inhibitor: SleepInhibitor::new(prevent_idle_sleep),
             agent_turn_running: false,
             last_turn_id: None,
+            admitted_turn_id: None,
             budget_limited_turn_ids: HashSet::new(),
+            rendered_completion_turn_ids: HashSet::new(),
             goal_status_active_turn_started_at: None,
         }
     }
@@ -39,6 +45,10 @@ impl TurnLifecycleState {
             .set_turn_running(/*turn_running*/ false);
     }
 
+    pub(super) fn is_running_or_admitted(&self) -> bool {
+        self.agent_turn_running || self.admitted_turn_id.is_some()
+    }
+
     pub(super) fn restore_running(&mut self, running: bool, now: Instant) {
         self.agent_turn_running = running;
         self.goal_status_active_turn_started_at = running.then_some(now);
@@ -48,7 +58,9 @@ impl TurnLifecycleState {
     pub(super) fn reset_thread(&mut self) {
         self.finish();
         self.last_turn_id = None;
+        self.admitted_turn_id = None;
         self.budget_limited_turn_ids.clear();
+        self.rendered_completion_turn_ids.clear();
     }
 
     pub(super) fn set_prevent_idle_sleep(&mut self, enabled: bool) {
