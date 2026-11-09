@@ -20,13 +20,15 @@ use codex_login::default_client::default_headers;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::version::CODEX_CLI_VERSION;
 use crate::version::update_check_version;
 
 pub(crate) use crate::updates_cache::dismiss_version;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
+    if !config.check_for_update_on_startup
+        || update_check_version().is_empty()
+        || is_source_build_version(update_check_version())
+    {
         return None;
     }
 
@@ -151,10 +153,6 @@ async fn fetch_latest_github_release_version(
 /// Returns the latest version to show in a popup, if it should be shown.
 /// This respects the user's dismissal choice for the current latest version.
 pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
-        return None;
-    }
-
     let version_file = version_filepath(config);
     let latest = get_upgrade_version(config)?;
     // If the user dismissed this exact version previously, do not show the popup.

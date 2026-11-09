@@ -18,42 +18,29 @@ deployment-status:
     @python3 "{{ justfile_directory() }}/scripts/deployment-status.py"
 
 # Build the optimized local CLI binary.
-# This version lookup is intentionally a little ugly: the AJE branch can have a
-# different ancestry from the release line, so the newest reachable tag may be
-# stale. Use the newest fetched release tag for the local build version instead.
+# Fetch tags for the reachable release baseline; the build remains usable offline.
 [unix]
-build: setup-rusty-v8
-    git fetch --tags --quiet || echo 'Could not refresh Git tags; using existing local tags.' >&2; release_tag=$(git tag --list 'rust-v[0-9]*' --sort=-version:refname | head -n 1); test -n "$release_tag" || { echo 'No rust-v release tag found. Fetch tags before building.' >&2; exit 1; }; release_version="${release_tag#rust-v}"; version="$release_version-aje+g$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- || echo .dirty)"; RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" CODEX_AJE_VERSION="$version" CODEX_BUILD_VERSION="$version" nice -n 10 rustup run 1.95.0 cargo build -p codex-cli --release
+build:
+    git fetch upstream --tags --quiet || echo 'Could not refresh upstream Git tags; using existing local tags.' >&2; RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 nice -n 10 python3 "{{ justfile_directory() }}/scripts/local_build_version.py" python3 "{{ justfile_directory() }}/scripts/local_v8.py" rustup run 1.95.0 cargo build -p codex-cli --release
 
 [windows]
 build:
-    git fetch --tags --quiet
-    $releaseTag = git describe --tags --match "rust-v[0-9]*" --abbrev=0
-    $releaseVersion = $releaseTag.Substring(6)
-    $sha = git rev-parse --short=12 HEAD
-    $dirty = if (git diff --quiet HEAD --) { "" } else { ".dirty" }
-    $env:CODEX_AJE_VERSION = "$releaseVersion-aje+g$sha$dirty"; $env:CODEX_BUILD_VERSION = "$releaseVersion-aje+g$sha$dirty"; cargo build -p codex-cli --release
+    git fetch upstream --tags --quiet; if ($LASTEXITCODE -ne 0) { Write-Warning 'Could not refresh upstream Git tags; using existing local tags.' }
+    python "{{ justfile_directory() }}/scripts/local_build_version.py" cargo build -p codex-cli --release
 
 # Build the companion executable used by the optional Code Mode feature.
 [unix]
-build-code-mode-host: setup-rusty-v8
-    RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" nice -n 10 rustup run 1.95.0 cargo build -p codex-code-mode-host --release
+build-code-mode-host:
+    RUSTC=$(rustup which --toolchain 1.95.0 rustc) CARGO_BUILD_JOBS=4 nice -n 10 python3 "{{ justfile_directory() }}/scripts/local_v8.py" rustup run 1.95.0 cargo build -p codex-code-mode-host --release
 
 [windows]
 build-code-mode-host:
     cargo build -p codex-code-mode-host --release
 
-# Cache the matching Codex-published Rusty V8 archive and bindings for macOS.
-[unix]
-setup-rusty-v8:
-    mkdir -p "$HOME/.cache/codex-aje/rusty-v8-150.4.0"
-    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_aarch64-apple-darwin.a.gz' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz"
-    test -s "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" || curl -fsSL 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_aarch64-apple-darwin.rs' -o "$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs"
-
 # Run the requested tests with the repository's usual local settings.
 [unix]
-test *args: setup-rusty-v8
-    RUSTY_V8_ARCHIVE="$HOME/.cache/codex-aje/rusty-v8-150.4.0/librusty_v8.a.gz" RUSTY_V8_SRC_BINDING_PATH="$HOME/.cache/codex-aje/rusty-v8-150.4.0/src_binding.rs" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+test *args:
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local python3 "{{ justfile_directory() }}/scripts/local_v8.py" cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
@@ -64,10 +51,10 @@ test *args:
 deploy-next: build build-code-mode-host
     mkdir -p "$HOME/bin"
     cp target/release/codex "$HOME/bin/codex-aje-next.tmp"
-    just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-aje-next.tmp"
+    if [ "$(uname -s)" = Darwin ]; then just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-aje-next.tmp"; fi
     mv -f "$HOME/bin/codex-aje-next.tmp" "$HOME/bin/codex-aje-next"
     cp target/release/codex-code-mode-host "$HOME/bin/codex-code-mode-host.tmp"
-    just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-code-mode-host.tmp"
+    if [ "$(uname -s)" = Darwin ]; then just --justfile {{ justfile_directory() }}/justfile.aje sign-binary "$HOME/bin/codex-code-mode-host.tmp"; fi
     mv -f "$HOME/bin/codex-code-mode-host.tmp" "$HOME/bin/codex-code-mode-host"
 
 [windows]
